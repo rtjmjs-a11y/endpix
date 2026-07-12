@@ -80,8 +80,7 @@ class Document(val width: Int, val height: Int, var name: String) {
         }
         compositeLayers(frame, sx, sy, ex, ey)
         displayCanvas.syncTexRegion(sx, sy, ex, ey)
-        displayCanvas.markDirty(sx, sy)
-        displayCanvas.markDirty(ex, ey)
+        displayCanvas.markDirtyAll()
     }
 
     private fun compositeLayers(frame: Frame, sx: Int, sy: Int, ex: Int, ey: Int) {

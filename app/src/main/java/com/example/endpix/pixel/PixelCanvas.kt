@@ -50,6 +50,13 @@ class PixelCanvas(val width: Int, val height: Int) {
         if (y > dirtyMaxY) dirtyMaxY = y
     }
 
+    fun markDirtyRegion(minX: Int, minY: Int, maxX: Int, maxY: Int) {
+        dirtyMinX = minX
+        dirtyMinY = minY
+        dirtyMaxX = maxX
+        dirtyMaxY = maxY
+    }
+
     fun markDirtyAll() {
         dirtyMinX = 0
         dirtyMinY = 0
@@ -150,6 +157,55 @@ class PixelCanvas(val width: Int, val height: Int) {
     }
 
     fun drawLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
+        val dx = Math.abs(x1 - x0)
+        val dy = -Math.abs(y1 - y0)
+        val sx = if (x0 < x1) 1 else -1
+        val sy = if (y0 < y1) 1 else -1
+        var err = dx + dy
+        var cx = x0
+        var cy = y0
+        while (true) {
+            this[cx, cy] = color
+            if (cx == x1 && cy == y1) break
+            val e2 = 2 * err
+            if (e2 >= dy) { err += dy; cx += sx }
+            if (e2 <= dx) { err += dx; cy += sy }
+        }
+    }
+
+    fun drawPixelPerfectLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
+        val dx = Math.abs(x1 - x0)
+        val dy = Math.abs(y1 - y0)
+        if (dx == 0 && dy == 0) { this[x0, y0] = color; return }
+        val sx = if (x0 < x1) 1 else -1
+        val sy = if (y0 < y1) 1 else -1
+        var x = x0
+        var y = y0
+        if (dx > dy) {
+            var d = 2 * dy - dx
+            for (i in 0..dx) {
+                this[x, y] = color
+                if (i == dx) break
+                if (d > 0) { y += sy; d -= 2 * dx }
+                x += sx; d += 2 * dy
+            }
+        } else {
+            var d = 2 * dx - dy
+            for (i in 0..dy) {
+                this[x, y] = color
+                if (i == dy) break
+                if (d > 0) { x += sx; d -= 2 * dy }
+                y += sy; d += 2 * dx
+            }
+        }
+    }
+
+    fun drawLineSize(x0: Int, y0: Int, x1: Int, y1: Int, color: Int, size: Int, pixelPerfect: Boolean) {
+        if (size <= 1 || pixelPerfect) {
+            drawPixelPerfectLine(x0, y0, x1, y1, color)
+            return
+        }
+        val r = size / 2
         var dx = Math.abs(x1 - x0)
         var dy = -Math.abs(y1 - y0)
         val sx = if (x0 < x1) 1 else -1
@@ -158,7 +214,15 @@ class PixelCanvas(val width: Int, val height: Int) {
         var cx = x0
         var cy = y0
         while (true) {
-            this[cx, cy] = color
+            var fy = if (pixelPerfect) cy else cy - r
+            while (fy <= if (pixelPerfect) cy else cy + r) {
+                var fx = if (pixelPerfect) cx else cx - r
+                while (fx <= if (pixelPerfect) cx else cx + r) {
+                    this[fx, fy] = color
+                    fx++
+                }
+                fy++
+            }
             if (cx == x1 && cy == y1) break
             val e2 = 2 * err
             if (e2 >= dy) {

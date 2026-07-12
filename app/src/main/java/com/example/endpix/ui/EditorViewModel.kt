@@ -9,6 +9,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,11 +29,13 @@ import com.example.endpix.pixel.FrameData
 import com.example.endpix.pixel.History
 import com.example.endpix.pixel.Layer
 import com.example.endpix.pixel.LayerData
+import com.example.endpix.pixel.PerfMode
 import com.example.endpix.pixel.PixelCanvas
 import com.example.endpix.pixel.SaveData
 import com.example.endpix.pixel.ShapeMode
 import com.example.endpix.pixel.ShortcutAction
 import com.example.endpix.pixel.Tool
+import com.example.endpix.pixel.ExpandDir
 import com.example.endpix.pixel.compositeFrame
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,6 +58,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     var shapeMode by mutableStateOf(ShapeMode.LINE)
     var shapeSelectorOpen by mutableStateOf(false)
     var shapeFill by mutableStateOf(false)
+    var brushSelectorOpen by mutableStateOf(false)
+    var brushSize by mutableIntStateOf(1)
+    var pixelPerfect by mutableStateOf(false)
+    var perfMode by mutableStateOf(PerfMode.REGION)
+    var uiCornerRadius by mutableFloatStateOf(8f)
     var hardwareAcceleration by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
     var shortcutTapAction by mutableStateOf(ShortcutAction.FIT)
@@ -63,6 +71,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     var color by mutableIntStateOf(0xFF000000.toInt())
     var gridVisible by mutableStateOf(true)
     var panMode by mutableStateOf(false)
+    var expandDir by mutableStateOf(ExpandDir.BOTTOM_RIGHT)
     var zoomPercent by mutableIntStateOf(100)
     var canUndo by mutableStateOf(false)
     var canRedo by mutableStateOf(false)
@@ -103,6 +112,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     private var anchorY = 0
     private var strokeSnapshot: IntArray? = null
     private val lassoPath = ArrayList<IntArray>()
+    private val strokePixels = HashSet<Long>()
 
     init {
         val saved = loadState()
@@ -132,6 +142,29 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     private fun requestRender() {
         renderer.activeFrame = activeDoc.activeFrame()
         glView?.requestRender()
+    }
+
+    private fun applyFlush(layer: PixelCanvas, doc: Document) {
+        when (perfMode) {
+            PerfMode.HA -> {
+                if (!renderer.hardwareAcceleration) {
+                    renderer.hardwareAcceleration = true
+                    renderer.invalidateTexture()
+                }
+                renderer.activeFrame = activeDoc.activeFrame()
+                layer.markDirtyAll()
+            }
+            else -> {
+                if (renderer.hardwareAcceleration) {
+                    renderer.hardwareAcceleration = false
+                    renderer.invalidateTexture()
+                }
+                if (perfMode == PerfMode.REGION)
+                    layer.getAndClearDirty()?.let { doc.flattenRegion(it[0], it[1], it[2], it[3]) }
+                else
+                    doc.flatten()
+            }
+        }
     }
 
     private fun bumpStructure() {
@@ -191,19 +224,33 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
         glView?.queueEvent {
             when (t) {
                 Tool.PENCIL -> {
+                    val sz = brushSize
+                    val pp = pixelPerfect
                     history.push(layer.canvas.snapshot())
-                    layer.canvas[x, y] = c
-                    doc.flatten()
+                    strokePixels.clear()
+                    if (sz <= 1 || pp) {
+                        layer.canvas[x, y] = c
+                        if (pp) strokePixels.add((x.toLong() shl 32) or (y.toLong() and 0xFFFFFFFFL))
+                    } else {
+                        val r = sz / 2
+                        var fy = y - r
+                        while (fy <= y + r) {
+                            var fx = x - r
+                            while (fx <= x + r) { layer.canvas[fx, fy] = c; fx++ }
+                            fy++
+                        }
+                    }
+                    applyFlush(layer.canvas, doc)
                 }
                 Tool.ERASER -> {
                     history.push(layer.canvas.snapshot())
                     layer.canvas[x, y] = 0
-                    doc.flatten()
+                    applyFlush(layer.canvas, doc)
                 }
                 Tool.BUCKET -> {
                     history.push(layer.canvas.snapshot())
                     layer.canvas.floodFill(x, y, c)
-                    doc.flatten()
+                    applyFlush(layer.canvas, doc)
                 }
                 Tool.EYEDROPPER -> {
                     val picked = doc.displayCanvas[x, y]
@@ -241,12 +288,58 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
         glView?.queueEvent {
             when (t) {
                 Tool.PENCIL -> {
-                    layer.canvas.drawLine(px, py, x, y, c)
-                    doc.flatten()
+                    val pp = pixelPerfect
+                    if (pp) layer.canvas[px, py] = 0
+                    layer.canvas.drawLineSize(px, py, x, y, c, brushSize, pp)
+                    if (pp) {
+                        val dx = Math.abs(x - px); val dy = Math.abs(y - py)
+                        val sx = if (px < x) 1 else -1; val sy = if (py < y) 1 else -1
+                        var cx = px; var cy = py
+                        if (dx > dy) {
+                            var d = 2 * dy - dx
+                            while (true) {
+                                val key = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                if (cx != px || cy != py) {
+                                    val ax1 = cx - 1; val ak1 = (ax1.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                    if (ak1 in strokePixels) { layer.canvas[ax1, cy] = 0; strokePixels.remove(ak1) }
+                                    val ax2 = cx + 1; val ak2 = (ax2.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                    if (ak2 in strokePixels) { layer.canvas[ax2, cy] = 0; strokePixels.remove(ak2) }
+                                    val ay1 = cy - 1; val ak3 = (cx.toLong() shl 32) or (ay1.toLong() and 0xFFFFFFFFL)
+                                    if (ak3 in strokePixels) { layer.canvas[cx, ay1] = 0; strokePixels.remove(ak3) }
+                                    val ay2 = cy + 1; val ak4 = (cx.toLong() shl 32) or (ay2.toLong() and 0xFFFFFFFFL)
+                                    if (ak4 in strokePixels) { layer.canvas[cx, ay2] = 0; strokePixels.remove(ak4) }
+                                }
+                                strokePixels.add(key)
+                                if (cx == x && cy == y) break
+                                if (d > 0) { cy += sy; d -= 2 * dx }
+                                cx += sx; d += 2 * dy
+                            }
+                        } else {
+                            var d = 2 * dx - dy
+                            while (true) {
+                                val key = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                if (cx != px || cy != py) {
+                                    val ax1 = cx - 1; val ak1 = (ax1.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                    if (ak1 in strokePixels) { layer.canvas[ax1, cy] = 0; strokePixels.remove(ak1) }
+                                    val ax2 = cx + 1; val ak2 = (ax2.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+                                    if (ak2 in strokePixels) { layer.canvas[ax2, cy] = 0; strokePixels.remove(ak2) }
+                                    val ay1 = cy - 1; val ak3 = (cx.toLong() shl 32) or (ay1.toLong() and 0xFFFFFFFFL)
+                                    if (ak3 in strokePixels) { layer.canvas[cx, ay1] = 0; strokePixels.remove(ak3) }
+                                    val ay2 = cy + 1; val ak4 = (cx.toLong() shl 32) or (ay2.toLong() and 0xFFFFFFFFL)
+                                    if (ak4 in strokePixels) { layer.canvas[cx, ay2] = 0; strokePixels.remove(ak4) }
+                                }
+                                strokePixels.add(key)
+                                if (cx == x && cy == y) break
+                                if (d > 0) { cx += sx; d -= 2 * dy }
+                                cy += sy; d += 2 * dx
+                            }
+                        }
+                    }
+                    applyFlush(layer.canvas, doc)
                 }
                 Tool.ERASER -> {
                     layer.canvas.drawLine(px, py, x, y, 0)
-                    doc.flatten()
+                    applyFlush(layer.canvas, doc)
                 }
                 Tool.SHAPE -> {
                     val fl = shapeFill
@@ -274,6 +367,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
             }
             requestRender()
         }
+        post { glView?.requestRender() }
         lastX = x
         lastY = y
     }
@@ -448,6 +542,15 @@ strokeSnapshot?.let { history.push(it) }
             shapeSelectorOpen = true
         } else {
             shapeSelectorOpen = !shapeSelectorOpen
+        }
+    }
+
+    fun onPencilToolTap() {
+        if (tool != Tool.PENCIL) {
+            selectTool(Tool.PENCIL)
+            brushSelectorOpen = true
+        } else {
+            brushSelectorOpen = !brushSelectorOpen
         }
     }
 
@@ -767,11 +870,11 @@ strokeSnapshot?.let { history.push(it) }
         }
     }
 
-    fun resizeCanvas(newW: Int, newH: Int) {
+    fun resizeCanvas(newW: Int, newH: Int, dir: ExpandDir = expandDir) {
         val oldDoc = activeDoc
         val newDoc = Document.create(newW, newH, oldDoc.name)
-        val offX = (newW - oldDoc.width) / 2
-        val offY = (newH - oldDoc.height) / 2
+        val offX = dir.offsetX(oldDoc.width, newW)
+        val offY = dir.offsetY(oldDoc.height, newH)
         for (fi in oldDoc.frames.indices) {
             val srcFrame = oldDoc.frames[fi]
             val dstFrame = if (fi < newDoc.frames.size) newDoc.frames[fi] else newDoc.addFrame()

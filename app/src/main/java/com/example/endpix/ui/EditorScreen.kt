@@ -54,13 +54,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import com.example.endpix.R
 import com.example.endpix.gl.PixelGLSurfaceView
+import com.example.endpix.pixel.ExpandDir
+import com.example.endpix.pixel.PerfMode
 import com.example.endpix.pixel.ShapeMode
 import com.example.endpix.pixel.ShortcutAction
 import com.example.endpix.pixel.Tool
 
 private val CellBg = Color(0xB32A2A2E)
+private val LocalCornerRadius = compositionLocalOf { 8f }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +75,7 @@ fun EditorScreen(vm: EditorViewModel) {
     @Suppress("UNUSED_EXPRESSION") vm.structureVersion
 
     var shapeBtnY by remember { mutableStateOf(0f) }
+    var pencilBtnY by remember { mutableStateOf(0f) }
     var boxY by remember { mutableStateOf(0f) }
     var topStripsH by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
@@ -87,6 +93,7 @@ fun EditorScreen(vm: EditorViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    CompositionLocalProvider(LocalCornerRadius provides vm.uiCornerRadius) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -114,7 +121,7 @@ fun EditorScreen(vm: EditorViewModel) {
             FrameStrip(vm)
         }
 
-        ToolColumn(vm, Modifier.align(Alignment.CenterStart)) { shapeBtnY = it }
+        ToolColumn(vm, Modifier.align(Alignment.CenterStart), onShapePositioned = { shapeBtnY = it }, onPencilPositioned = { pencilBtnY = it })
 
         PaletteBar(vm, Modifier.align(Alignment.CenterEnd))
 
@@ -126,6 +133,10 @@ fun EditorScreen(vm: EditorViewModel) {
         if (vm.tool == Tool.SHAPE && vm.shapeSelectorOpen) {
             val offsetDp = with(density) { (shapeBtnY - boxY).coerceAtLeast(0f).toDp() }
             ShapeSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
+        }
+        if (vm.tool == Tool.PENCIL && vm.brushSelectorOpen) {
+            val offsetDp = with(density) { (pencilBtnY - boxY).coerceAtLeast(0f).toDp() }
+            BrushSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
         }
     }
 
@@ -158,7 +169,8 @@ fun EditorScreen(vm: EditorViewModel) {
             },
             title = { Text("导出") },
             text = { Text(msg) }
-        )
+)
+    }
     }
 }
 
@@ -166,7 +178,10 @@ fun EditorScreen(vm: EditorViewModel) {
 private fun StatusBar(vm: EditorViewModel) {
     val doc = vm.activeDoc
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)
+        modifier = Modifier
+            .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+            .background(Color(0x4D000000))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("${doc.width}×${doc.height}", style = MaterialTheme.typography.labelSmall, color = Color.White)
@@ -196,7 +211,7 @@ private fun DocStrip(vm: EditorViewModel) {
             val selected = i == vm.activeDocIndex
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(if (selected) MaterialTheme.colorScheme.primary else CellBg)
                     .clickable { vm.selectDocument(i) }
                     .padding(start = 8.dp, top = 4.dp, bottom = 4.dp, end = 2.dp)
@@ -225,9 +240,9 @@ private fun FrameStrip(vm: EditorViewModel) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(if (selected) MaterialTheme.colorScheme.primary else CellBg)
-                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), RoundedCornerShape(6.dp))
+                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), RoundedCornerShape(LocalCornerRadius.current.dp))
                     .clickable { vm.selectFrame(i) },
                 contentAlignment = Alignment.Center
             ) {
@@ -245,7 +260,7 @@ private fun FrameStrip(vm: EditorViewModel) {
 }
 
 @Composable
-private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onShapePositioned: (Float) -> Unit) {
+private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onShapePositioned: (Float) -> Unit, onPencilPositioned: (Float) -> Unit) {
     val shapeIcon = when (vm.shapeMode) {
         ShapeMode.LINE -> R.drawable.ic_line
         ShapeMode.RECTANGLE -> if (vm.shapeFill) R.drawable.ic_rect_filled else R.drawable.ic_rect
@@ -266,8 +281,18 @@ private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onSha
     ) {
         Spacer(Modifier.weight(1f))
         tools.forEach { (tool, icon) ->
-            IconSquareButton(iconRes = icon, selected = vm.tool == tool, size = 40) { vm.selectTool(tool) }
+        Box(modifier = if (tool == Tool.PENCIL) Modifier.onGloballyPositioned { onPencilPositioned(it.positionInRoot().y) } else Modifier) {
+            IconSquareButton(iconRes = icon, selected = vm.tool == tool, size = 40) {
+                if (tool == Tool.PENCIL) vm.onPencilToolTap() else vm.selectTool(tool)
+            }
+            if (tool == Tool.PENCIL && vm.brushSize > 1) {
+                Text("${vm.brushSize}", color = Color(0xFF64B5F6), style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = -2.dp)
+                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xDD1A1A1E))
+                        .padding(horizontal = 3.dp))
+            }
         }
+    }
         IconSquareButton(
             iconRes = shapeIcon,
             selected = vm.tool == Tool.SHAPE,
@@ -290,9 +315,9 @@ private fun PaletteBar(vm: EditorViewModel, modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .padding(vertical = 2.dp)
                     .size(30.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(Color(c))
-                    .border(width = if (vm.color == c) 2.dp else 1.dp, color = if (vm.color == c) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), shape = RoundedCornerShape(6.dp))
+                    .border(width = if (vm.color == c) 2.dp else 1.dp, color = if (vm.color == c) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), shape = RoundedCornerShape(LocalCornerRadius.current.dp))
                     .clickable { vm.selectColor(c) }
             )
         }
@@ -307,7 +332,7 @@ private fun LayerPanel(vm: EditorViewModel, modifier: Modifier = Modifier) {
         modifier = modifier
             .width(96.dp)
             .padding(4.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
             .background(Color(0xE62A2A2E))
             .padding(6.dp)
     ) {
@@ -331,17 +356,17 @@ private fun LayerPanel(vm: EditorViewModel, modifier: Modifier = Modifier) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(if (selected) MaterialTheme.colorScheme.primaryContainer else CellBg)
-                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(6.dp))
+                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(LocalCornerRadius.current.dp))
                     .clickable { vm.selectLayer(idx) }
                     .padding(3.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (thumb != null) {
-                        Image(bitmap = thumb, contentDescription = layer.name, contentScale = ContentScale.FillBounds, modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)))
+                        Image(bitmap = thumb, contentDescription = layer.name, contentScale = ContentScale.FillBounds, modifier = Modifier.size(20.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)))
                     } else {
-                        Box(modifier = Modifier.size(20.dp).background(Color(0xFF3A3A3E), RoundedCornerShape(4.dp)))
+                        Box(modifier = Modifier.size(20.dp).background(Color(0xFF3A3A3E), RoundedCornerShape(LocalCornerRadius.current.dp)))
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(layer.name, style = MaterialTheme.typography.labelSmall, color = Color.White, maxLines = 1)
@@ -361,7 +386,6 @@ private fun LayerPanel(vm: EditorViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun BottomStrip(vm: EditorViewModel, modifier: Modifier = Modifier, onNew: () -> Unit, onResize: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
-    var shortcutOpen by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -382,11 +406,11 @@ private fun BottomStrip(vm: EditorViewModel, modifier: Modifier = Modifier, onNe
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                         .background(Color(0xFF2A2A2E))
                         .combinedClickable(
-                            onClick = { shortcutOpen = true },
-                            onLongClick = { vm.executeShortcut(vm.shortcutTapAction) }
+                            onClick = { vm.executeShortcut(vm.shortcutTapAction) },
+                            onLongClick = { vm.executeShortcut(vm.shortcutLongPressAction) }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -396,24 +420,6 @@ private fun BottomStrip(vm: EditorViewModel, modifier: Modifier = Modifier, onNe
                         tint = Color.White,
                         modifier = Modifier.size(22.dp)
                     )
-                }
-                DropdownMenu(expanded = shortcutOpen, onDismissRequest = { shortcutOpen = false }) {
-                    ShortcutAction.entries.forEach { action ->
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(painter = painterResource(vm.shortcutActionIcon(action)), contentDescription = action.label, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(action.label)
-                                }
-                            },
-                            onClick = {
-                                shortcutOpen = false
-                                vm.shortcutTapAction = action
-                                vm.executeShortcut(action)
-                            }
-                        )
-                    }
                 }
             }
         }
@@ -440,7 +446,7 @@ private fun ShapeSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
     )
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
             .background(Color(0xE62A2A2E))
             .padding(2.dp),
         verticalArrangement = Arrangement.spacedBy(1.dp)
@@ -451,7 +457,7 @@ private fun ShapeSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
             Row(
                 modifier = Modifier
                     .height(30.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .clickable { vm.selectShapeMode(mode) }
                     .padding(horizontal = 6.dp),
@@ -464,14 +470,14 @@ private fun ShapeSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
         }
         Spacer(
             Modifier
-                .padding(horizontal = 4.dp)
+                .width(70.dp)
                 .height(1.dp)
-                .background(Color(0x33FFFFFF))
+                .background(Color(0x66FFFFFF))
         )
         Row(
             modifier = Modifier
                 .height(30.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                 .background(if (vm.shapeFill) MaterialTheme.colorScheme.primary else Color.Transparent)
                 .clickable { vm.shapeFill = !vm.shapeFill }
                 .padding(horizontal = 6.dp),
@@ -479,8 +485,27 @@ private fun ShapeSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
         ) {
             Icon(painter = painterResource(R.drawable.ic_bucket), contentDescription = "填充", tint = if (vm.shapeFill) MaterialTheme.colorScheme.onPrimary else Color.White, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text("填充", style = MaterialTheme.typography.labelSmall, color = if (vm.shapeFill) MaterialTheme.colorScheme.onPrimary else Color.White, maxLines = 1)
+            Text("空心填充", style = MaterialTheme.typography.labelSmall, color = if (vm.shapeFill) MaterialTheme.colorScheme.onPrimary else Color.White, maxLines = 1)
         }
+    }
+}
+
+@Composable
+private fun BrushSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("画笔大小: ${vm.brushSize}", color = Color.White, style = MaterialTheme.typography.labelSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp).width(160.dp)) {
+            Text("1", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+            Slider(value = vm.brushSize.toFloat(), onValueChange = { vm.brushSize = it.toInt().coerceIn(1, 10) }, valueRange = 1f..10f, steps = 8, modifier = Modifier.weight(1f))
+            Text("10", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+        }
+        Text("像素完美(1px)", color = if (vm.pixelPerfect) Color.Black else Color.White, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.width(160.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                .background(if (vm.pixelPerfect) MaterialTheme.colorScheme.primary else Color.Transparent)
+                .clickable { vm.pixelPerfect = !vm.pixelPerfect }.padding(horizontal = 6.dp, vertical = 6.dp))
     }
 }
 
@@ -496,7 +521,7 @@ private fun IconSquareButton(
     Box(
         modifier = modifier
             .size(size.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
             .background(when { !enabled -> Color(0x22FFFFFF); selected -> MaterialTheme.colorScheme.primary; else -> CellBg })
             .clickable(enabled = enabled) { onClick() },
         contentAlignment = Alignment.Center
@@ -531,13 +556,13 @@ private fun NewCanvasDialog(onDismiss: () -> Unit, onConfirm: (Int, Int) -> Unit
             Column {
                 presets.forEach { (w, h) ->
                     Row(modifier = Modifier.fillMaxWidth().clickable { selected = w to h; useCustom = false }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).background(if (!useCustom && selected == w to h) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E)))
+                        Box(modifier = Modifier.size(20.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(if (!useCustom && selected == w to h) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E)))
                         Spacer(Modifier.size(12.dp))
                         Text("$w × $h")
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth().clickable { useCustom = true }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).background(if (useCustom) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E)))
+                    Box(modifier = Modifier.size(20.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(if (useCustom) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E)))
                     Spacer(Modifier.size(12.dp))
                     Text("自定义", color = Color.White)
                     Spacer(Modifier.size(8.dp))
@@ -563,98 +588,133 @@ private fun ResizeCanvasDialog(vm: EditorViewModel, onDismiss: () -> Unit, onCon
     val doc = vm.activeDoc
     var newW by remember { mutableStateOf(doc.width.toString()) }
     var newH by remember { mutableStateOf(doc.height.toString()) }
+    var selectedDir by remember { mutableStateOf(vm.expandDir) }
+    var dirPickerOpen by remember { mutableStateOf(false) }
+    val dirs = listOf(
+        listOf(ExpandDir.TOP_LEFT, ExpandDir.TOP, ExpandDir.TOP_RIGHT),
+        listOf(ExpandDir.LEFT, ExpandDir.CENTER, ExpandDir.RIGHT),
+        listOf(ExpandDir.BOTTOM_LEFT, ExpandDir.BOTTOM, ExpandDir.BOTTOM_RIGHT)
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                val w = newW.toIntOrNull()?.coerceIn(1, 4096) ?: doc.width
-                val h = newH.toIntOrNull()?.coerceIn(1, 4096) ?: doc.height
-                onConfirm(w, h)
-            }) { Text("调整") }
-        },
+        confirmButton = { TextButton(onClick = {
+            val w = newW.toIntOrNull()?.coerceIn(1, 4096) ?: doc.width
+            val h = newH.toIntOrNull()?.coerceIn(1, 4096) ?: doc.height
+            vm.expandDir = selectedDir; onConfirm(w, h)
+        }) { Text("调整") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
         title = { Text("调整画布大小") },
-        text = {
-            Column {
-                Text("当前: ${doc.width} × ${doc.height}", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.size(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = newW, onValueChange = { newW = it.filter { c -> c.isDigit() } },
-                        modifier = Modifier.weight(1f), label = { Text("宽度") },
-                        singleLine = true, textStyle = MaterialTheme.typography.bodySmall
-                    )
-                    Text(" × ", color = Color.White)
-                    androidx.compose.material3.OutlinedTextField(
-                        value = newH, onValueChange = { newH = it.filter { c -> c.isDigit() } },
-                        modifier = Modifier.weight(1f), label = { Text("高度") },
-                        singleLine = true, textStyle = MaterialTheme.typography.bodySmall
-                    )
+        text = { Column {
+            Text("当前: ${doc.width} × ${doc.height}", color = Color.White, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.size(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.OutlinedTextField(value = newW, onValueChange = { newW = it.filter { c -> c.isDigit() } }, modifier = Modifier.weight(1f), label = { Text("宽度") }, singleLine = true, textStyle = MaterialTheme.typography.bodySmall)
+                Text(" × ", color = Color.White)
+                androidx.compose.material3.OutlinedTextField(value = newH, onValueChange = { newH = it.filter { c -> c.isDigit() } }, modifier = Modifier.weight(1f), label = { Text("高度") }, singleLine = true, textStyle = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.size(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("扩展方向: ", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                Box {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { dirPickerOpen = !dirPickerOpen }) {
+                        Icon(painter = painterResource(selectedDir.iconRes()), contentDescription = selectedDir.label, tint = Color(0xFF64B5F6), modifier = Modifier.size(20.dp))
+                        Text(selectedDir.label, color = Color(0xFF64B5F6), style = MaterialTheme.typography.bodySmall)
+                    }
+                    DropdownMenu(expanded = dirPickerOpen, onDismissRequest = { dirPickerOpen = false }) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            for (row in dirs) {
+                                Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                                    for (dir in row) {
+                                        val isSel = dir == selectedDir
+                                        Box(modifier = Modifier.size(40.dp).clickable { selectedDir = dir; dirPickerOpen = false }.then(if (isSel) Modifier.background(Color(0x30FFFFFF), RoundedCornerShape(LocalCornerRadius.current.dp)) else Modifier), contentAlignment = Alignment.Center) {
+                                            Icon(painter = painterResource(dir.iconRes()), contentDescription = dir.label, tint = if (isSel) Color(0xFF64B5F6) else Color(0xB0FFFFFF), modifier = Modifier.size(24.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } }
+)
+}
+
+@Composable
+private fun ShortcutPicker(label: String, selected: ShortcutAction, onSelect: (ShortcutAction) -> Unit, icon: @Composable (ShortcutAction) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xFF2A2A2E)).clickable { open = true }.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("$label: ", color = Color.White, style = MaterialTheme.typography.bodySmall)
+            icon(selected)
+            Text(selected.label, color = Color(0xFF64B5F6), style = MaterialTheme.typography.bodySmall)
+            Text("▼", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Column(modifier = Modifier.padding(4.dp)) {
+                ShortcutAction.entries.forEach { action ->
+                    val sel = action == selected
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                            .clickable { onSelect(action); open = false }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        icon(action)
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.label, style = MaterialTheme.typography.bodySmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.White)
+                    }
                 }
             }
         }
-    )
+    }
 }
 
 @Composable
 private fun SettingsDialog(vm: EditorViewModel) {
     var selectedCategory by remember { mutableStateOf(0) }
-    val categories = listOf("常用设置", "网格与背景")
+    val categories = listOf("常用设置", "网格与背景", "特殊选项")
     AlertDialog(
         onDismissRequest = { vm.showSettings = false },
         confirmButton = { TextButton(onClick = { vm.showSettings = false }) { Text("关闭") } },
         title = { Text("设置") },
+        shape = RoundedCornerShape(LocalCornerRadius.current.dp),
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     categories.forEachIndexed { i, name ->
                         val sel = selectedCategory == i
                         Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (sel) MaterialTheme.colorScheme.primary else Color(0xFF2A2A2E))
-                                .clickable { selectedCategory = i }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(name, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.White)
-                        }
+                            modifier = Modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(if (sel) MaterialTheme.colorScheme.primary else Color(0xFF2A2A2E))
+                                .clickable { selectedCategory = i }.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) { Text(name, style = MaterialTheme.typography.labelSmall, color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.White) }
                     }
                 }
                 when (selectedCategory) {
                     0 -> {
-                        Text("单击动作", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                        ShortcutAction.entries.forEach { action ->
-                            val sel = vm.shortcutTapAction == action
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                                    .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable { vm.shortcutTapAction = action }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(if (sel) MaterialTheme.colorScheme.onPrimary else Color(0xFF3A3A3E)))
-                                Spacer(Modifier.size(8.dp))
-                                Text(action.label, color = Color.White, style = MaterialTheme.typography.bodySmall)
-                            }
+                        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0x4DFFFFFF)).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                            Text("快捷键", color = Color.White, style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(Modifier.size(4.dp))
-                        Text("长按动作", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                        ShortcutAction.entries.forEach { action ->
-                            val sel = vm.shortcutLongPressAction == action
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                                    .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable { vm.shortcutLongPressAction = action }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).background(if (sel) MaterialTheme.colorScheme.onPrimary else Color(0xFF3A3A3E)))
-                                Spacer(Modifier.size(8.dp))
-                                Text(action.label, color = Color.White, style = MaterialTheme.typography.bodySmall)
-                            }
+                        ShortcutPicker(label = "单击动作", selected = vm.shortcutTapAction, onSelect = { vm.shortcutTapAction = it }, icon = { painterResource(vm.shortcutActionIcon(it)) })
+                        Spacer(Modifier.size(6.dp))
+                        ShortcutPicker(label = "长按动作", selected = vm.shortcutLongPressAction, onSelect = { vm.shortcutLongPressAction = it }, icon = { painterResource(vm.shortcutActionIcon(it)) })
+                        Spacer(Modifier.size(6.dp))
+                        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0x4DFFFFFF)).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                            Text("UI图图形", color = Color.White, style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(Modifier.size(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { vm.autoSaveOnBackground = !vm.autoSaveOnBackground }.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().height(24.dp).padding(horizontal = 4.dp)) {
+                            Text("UI圆角: ${vm.uiCornerRadius.toInt()}", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.weight(1f))
+                            Text("0", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                            Slider(value = vm.uiCornerRadius, onValueChange = { vm.uiCornerRadius = it.coerceIn(0f, 20f) }, valueRange = 0f..20f, steps = 19, modifier = Modifier.width(100.dp))
+                            Text("20", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(Modifier.size(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).clickable { vm.autoSaveOnBackground = !vm.autoSaveOnBackground }.padding(8.dp)) {
                             Text("自动保存", color = Color.White, style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = vm.autoSaveOnBackground, onCheckedChange = { vm.autoSaveOnBackground = it })
@@ -662,10 +722,20 @@ private fun SettingsDialog(vm: EditorViewModel) {
                         Text("进后台时自动保存画布", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
                     }
                     1 -> {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { vm.toggleGrid() }.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).clickable { vm.toggleGrid() }.padding(8.dp)) {
                             Text("显示网格", color = Color.White, style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.weight(1f))
                             Switch(checked = vm.gridVisible, onCheckedChange = { vm.toggleGrid() })
+                        }
+                    }
+                    2 -> {
+                        Text("性能方案", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        PerfMode.entries.forEach { mode ->
+                            val sel = vm.perfMode == mode
+                            Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { vm.perfMode = mode }.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                                Text(mode.label, color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.White, style = MaterialTheme.typography.bodySmall)
+                                Text(mode.desc, color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.Gray, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
