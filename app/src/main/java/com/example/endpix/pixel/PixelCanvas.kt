@@ -262,10 +262,15 @@ class PixelCanvas(val width: Int, val height: Int) {
     }
 
     fun drawLineSize(x0: Int, y0: Int, x1: Int, y1: Int, color: Int, size: Int, pixelPerfect: Boolean) {
-        if (size <= 1 || pixelPerfect) {
+        if (size <= 1 && pixelPerfect) {
             drawPixelPerfectLine(x0, y0, x1, y1, color)
             return
         }
+        if (size <= 1) {
+            drawLine(x0, y0, x1, y1, color)
+            return
+        }
+        // size > 1
         val r = size / 2
         var dx = Math.abs(x1 - x0)
         var dy = -Math.abs(y1 - y0)
@@ -274,11 +279,11 @@ class PixelCanvas(val width: Int, val height: Int) {
         var err = dx + dy
         var cx = x0
         var cy = y0
-        while (true) {
-            var fy = if (pixelPerfect) cy else cy - r
-            while (fy <= if (pixelPerfect) cy else cy + r) {
-                var fx = if (pixelPerfect) cx else cx - r
-                while (fx <= if (pixelPerfect) cx else cx + r) {
+while (true) {
+            var fy = cy - r
+            while (fy <= cy + r) {
+                var fx = cx - r
+                while (fx <= cx + r) {
                     this[fx, fy] = color
                     fx++
                 }

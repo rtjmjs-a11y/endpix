@@ -8,7 +8,8 @@ data class SaveData(
     val tool: Tool,
     val color: Int,
     val shapeMode: ShapeMode,
-    val shapeFill: Boolean
+    val shapeFill: Boolean,
+    val uiCornerRadius: Float = 8f
 ) : Serializable
 
 data class DocData(

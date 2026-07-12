@@ -1,96 +1,29 @@
 # Not2Pix 变更日志
 
 > AI 可读格式。供后续 AI 读取项目变更历史。
-> 更新: 2026-07-12 18:05
+> 更新: 2026-07-12 20:50
 
 ---
 
-## 2026-07-12 第二轮变更 (commit a53ace1)
+## 设计准则 (AI 必须遵守)
 
-### 文件: `pixel/Tool.kt`
+### 紧凑间距
+- 所有按钮、面板、选择器的上下间距必须紧凑：`Arrangement.spacedBy(4.dp)` 或更小
+- 内边距使用 `padding(4.dp)` 或 `padding(6.dp)`，不超过 8dp
+- 工具栏按钮大小 40dp，间距 4dp
+- 子选项弹窗 padding 6dp，内部间距 4dp
+- SVG 图标 24dp viewport，白色填充 `#FFFFFFFF`
 
-**变更:**
-- `Tool.EYEDROPPER` -> `Tool.SELECT` (取色器替换为选择工具)
-- 新增 `enum SelectMode { RECT, LASSO }` - 方形选择/套索选择
-- 新增 `enum PpMode(val label) { NORMAL("正常"), EXTREME("极端") }` - 像素完美模式
+### 半透明叠加
+- 弹窗背景: `Color(0xE62A2A2E)` (95% 不透明深灰)
+- 标签栏背景: `Color(0x4DFFFFFF)` (30% 透明白)
+- Info 栏背景: `Color(0x4D000000)` (30% 透明黑)
 
-### 文件: `pixel/PixelCanvas.kt`
-
-**变更:**
-- `drawPixelPerfectLine` 改用 1-connected Bresenham (midpoint 变体，每步只移一个方向)
-- 新增 `strokePixels: HashSet<Long>` 追踪当前笔画像素
-- 新增 `beginStroke()` 清空追踪集合
-- `ppSet()` 改为：设像素 + 记录到 strokePixels
-- `cleanPixelJoints(minX, minY, maxX, maxY, color)` 改为：
-  - 只扫描笔画边界框区域 (非全画布)
-  - 处理 3/4 L 形 (移除角点)
-  - 仅移除 `strokePixels` 中的像素 (不影响已有内容)
-  - 限制最多 3 轮扫描
-- 删除 `wouldCreate2x2` 和 `safeGet` (不再使用)
-
-### 文件: `ui/EditorViewModel.kt`
-
-**新增状态:**
-- `ppMode: PpMode` (默认 EXTREME) - 像素完美子模式
-- `eraserSelectorOpen: Boolean` - 橡皮擦子选项弹窗
-- `eraserSize: Int` (1..10) - 橡皮擦粗细
-- `bucketRemovePixels: Boolean` - 油漆桶移除像素模式
-- `selectSelectorOpen: Boolean` - 选择工具子选项弹窗
-- `selectMode: SelectMode` (默认 RECT) - 选择模式
-- `sMinX/sMinY/sMaxX/sMaxY` - 笔画边界框追踪
-
-**新增方法:**
-- `onEraserToolTap()` - 橡皮擦按钮点击 (选中+展开子选项)
-- `onBucketToolTap()` - 油漆桶按钮点击
-- `onSelectToolTap()` - 选择工具按钮点击 (选中+展开子选项)
-- `onSelectLongPress()` - 长按选择工具 (TODO: 全选画布)
-
-**修改:**
-- PENCIL onStrokeDown: `beginStroke()` + `ppSet` 记录首像素 + 边界框初始化
-- PENCIL onStrokeMove: 追踪边界框 (px,py 和 x,y)
-- PENCIL onStrokeUp: `cleanPixelJoints` 仅在 `ppMode == EXTREME` 时调用 + `doc.flatten()`
-- ERASER onStrokeDown/Move: 使用 `eraserSize` 绘制方块橡皮
-- BUCKET onStrokeDown: `bucketRemovePixels` 时填充 0 (透明)
-- EYEDROPPER 处理器替换为 SELECT (空操作, TODO)
-
-### 文件: `ui/EditorScreen.kt`
-
-**新增组件:**
-- `EraserSelector` - 橡皮擦大小滑块 (1-10)
-- `BucketSelector` - "移除像素"开关
-- `SelectSelector` - 方形选择/套索选择
-
-**修改:**
-- `BrushSelector` 新增 正常/极端 子选项 (仅 pixelPerfect 启用时显示)
-- `BrushSelector` 滑块在 pixelPerfect 启用时锁定为 1 (disabled)
-- `ToolColumn` 重构: 每个工具独立 Box + onGloballyPositioned 回调
-  - onPencilPositioned / onEraserPositioned / onBucketPositioned / onSelectPositioned
-- 工具栏按钮: PENCIL -> ERASER -> BUCKET -> SELECT -> SHAPE
-- 橡皮擦角标显示 eraserSize (>1 时)
-- 画笔角标在 pixelPerfect 时不显示
-- 4 个新选择器弹窗定位 (各自 btnY)
-
-### 关键约束 (更新)
-
-| 项 | 值 | 文件位置 |
-|----|-----|---------|
-| 画笔默认粗细 | 1 | EditorViewModel.kt:62 |
-| 像素完美默认 | false | EditorViewModel.kt:63 |
-| 像素完美模式默认 | EXTREME | EditorViewModel.kt:64 |
-| 橡皮擦默认粗细 | 1 | EditorViewModel.kt:66 |
-| 油漆桶移除像素默认 | false | EditorViewModel.kt:67 |
-| 选择模式默认 | RECT | EditorViewModel.kt:68 |
-| 性能方案默认 | REGION | EditorViewModel.kt:65 |
-| UI 圆角默认 | 8f | EditorViewModel.kt:69 |
-
-### Bug 记录 (更新)
-
-| 问题 | 状态 | 说明 |
-|------|------|------|
-| cleanPixelJoints 误删已有像素 | 已修复 | strokePixels 追踪，仅删当前笔画像素 |
-| cleanPixelJoints 全画布扫描慢 | 已修复 | 限制笔画边界框 + 最多 3 轮 |
-| 像素完美影响画笔大小 | 已修复 | 启用时滑块锁定 1px |
-| 选择工具实际功能 | TODO | onSelectLongPress 全选 + 选择区域操作未实现 |
+### 颜色规范
+- 选中高亮: `MaterialTheme.colorScheme.primary` (蓝底) + 白/黑字
+- 未选中文本: `Color.White`
+- 辅助文本: `Color.Gray`
+- 按钮选中: `Color(0xFF2A2A2E)`
 
 ---
 

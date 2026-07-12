@@ -70,6 +70,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     var selectSelectorOpen by mutableStateOf(false)
     var selectMode by mutableStateOf(SelectMode.RECT)
     var hasSelection by mutableStateOf(false)
+    var showColorPicker by mutableStateOf(false)
+    var pickerIndex by mutableIntStateOf(0)
+    var eyedropperActive by mutableStateOf(false)
+    var palettePopupOpen by mutableStateOf(false)
     var selX0 by mutableIntStateOf(0); var selY0 by mutableIntStateOf(0)
     var selX1 by mutableIntStateOf(0); var selY1 by mutableIntStateOf(0)
     private var selSnapshot: IntArray? = null
@@ -229,6 +233,18 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     }
 
     override fun onStrokeDown(canvasX: Float, canvasY: Float) {
+        if (eyedropperActive) {
+            val x = Math.round(canvasX)
+            val y = Math.round(canvasY)
+            val doc = activeDoc
+            val picked = if (x in 0 until doc.width && y in 0 until doc.height) doc.displayCanvas[x, y] else color
+            post {
+                color = picked
+                addToPalette(picked)
+                eyedropperActive = false
+            }
+            return
+        }
         val t = tool
         val c = color
         val x = Math.round(canvasX)
@@ -239,11 +255,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
             when (t) {
                 Tool.PENCIL -> {
                     val sz = brushSize
-                    val pp = pixelPerfect
+                    val pp = pixelPerfect && sz <= 1
                     history.push(layer.canvas.snapshot())
                     sMinX = x; sMinY = y; sMaxX = x; sMaxY = y
                     if (pp) layer.canvas.beginStroke()
-                    if (sz <= 1 || pp) {
+                    if (sz <= 1) {
                         if (pp) layer.canvas.ppSet(x, y, c) else layer.canvas[x, y] = c
                     } else {
                         val r = sz / 2
@@ -302,6 +318,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     }
 
     override fun onStrokeMove(canvasX: Float, canvasY: Float) {
+        if (eyedropperActive) return
         val t = tool
         val c = color
         val x = Math.round(canvasX)
@@ -700,6 +717,16 @@ strokeSnapshot?.let { history.push(it) }
         }
     }
 
+    fun openColorPicker(idx: Int) {
+        pickerIndex = idx
+        showColorPicker = true
+    }
+
+    fun commitColorPicker(newColor: Int) {
+        if (pickerIndex < palette.size) palette[pickerIndex] = newColor
+        showColorPicker = false
+    }
+
     fun newCanvas(w: Int, h: Int) {
         addDocument(w, h)
     }
@@ -918,7 +945,7 @@ strokeSnapshot?.let { history.push(it) }
                 }, frame.activeLayerIndex)
             }, doc.activeFrameIndex)
         }
-        return SaveData(docs, activeDocIndex, tool, color, shapeMode, shapeFill)
+        return SaveData(docs, activeDocIndex, tool, color, shapeMode, shapeFill, uiCornerRadius)
     }
 
     private fun restoreFromSave(data: SaveData) {
@@ -951,6 +978,7 @@ strokeSnapshot?.let { history.push(it) }
             color = data.color
             shapeMode = data.shapeMode
             shapeFill = data.shapeFill
+            uiCornerRadius = data.uiCornerRadius
         } catch (e: Exception) {
             documents.clear()
             documents.add(Document.create(DEFAULT_W, DEFAULT_H, "Doc 1"))
