@@ -27,6 +27,8 @@ import com.example.endpix.pixel.Document
 import com.example.endpix.pixel.Frame
 import com.example.endpix.pixel.FrameData
 import com.example.endpix.pixel.History
+import com.example.endpix.pixel.PpMode
+import com.example.endpix.pixel.SelectMode
 import com.example.endpix.pixel.Layer
 import com.example.endpix.pixel.LayerData
 import com.example.endpix.pixel.PerfMode
@@ -61,6 +63,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     var brushSelectorOpen by mutableStateOf(false)
     var brushSize by mutableIntStateOf(1)
     var pixelPerfect by mutableStateOf(false)
+    var ppMode by mutableStateOf(PpMode.EXTREME)
+    var eraserSelectorOpen by mutableStateOf(false)
+    var eraserSize by mutableIntStateOf(1)
+    var bucketRemovePixels by mutableStateOf(false)
+    var selectSelectorOpen by mutableStateOf(false)
+    var selectMode by mutableStateOf(SelectMode.RECT)
     var perfMode by mutableStateOf(PerfMode.REGION)
     var uiCornerRadius by mutableFloatStateOf(8f)
     var hardwareAcceleration by mutableStateOf(false)
@@ -112,6 +120,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     private var anchorY = 0
     private var strokeSnapshot: IntArray? = null
     private val lassoPath = ArrayList<IntArray>()
+    private val ppPoints = ArrayList<IntArray>()
+    private var sMinX = 0; private var sMinY = 0; private var sMaxX = 0; private var sMaxY = 0
 
     init {
         val saved = loadState()
@@ -224,9 +234,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
             when (t) {
                 Tool.PENCIL -> {
                     val sz = brushSize
+                    val pp = pixelPerfect
                     history.push(layer.canvas.snapshot())
-                    if (sz <= 1 || pixelPerfect) {
-                        layer.canvas[x, y] = c
+                    sMinX = x; sMinY = y; sMaxX = x; sMaxY = y
+                    if (pp) layer.canvas.beginStroke()
+                    if (sz <= 1 || pp) {
+                        if (pp) layer.canvas.ppSet(x, y, c) else layer.canvas[x, y] = c
                     } else {
                         val r = sz / 2
                         var fy = y - r
@@ -239,18 +252,28 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.ERASER -> {
+                    val es = eraserSize
                     history.push(layer.canvas.snapshot())
-                    layer.canvas[x, y] = 0
+                    if (es <= 1) {
+                        layer.canvas[x, y] = 0
+                    } else {
+                        val r = es / 2
+                        var fy = y - r
+                        while (fy <= y + r) {
+                            var fx = x - r
+                            while (fx <= x + r) { layer.canvas[fx, fy] = 0; fx++ }
+                            fy++
+                        }
+                    }
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.BUCKET -> {
                     history.push(layer.canvas.snapshot())
-                    layer.canvas.floodFill(x, y, c)
+                    if (bucketRemovePixels) layer.canvas.floodFill(x, y, 0) else layer.canvas.floodFill(x, y, c)
                     applyFlush(layer.canvas, doc)
                 }
-                Tool.EYEDROPPER -> {
-                    val picked = doc.displayCanvas[x, y]
-                    post { color = picked; addToPalette(picked) }
+                Tool.SELECT -> {
+                    // selection handled in onStrokeMove/Up
                 }
                 Tool.SHAPE -> {
                     strokeSnapshot = layer.canvas.snapshot()
@@ -284,11 +307,30 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
         glView?.queueEvent {
             when (t) {
                 Tool.PENCIL -> {
+                    if (px < sMinX) sMinX = px; if (py < sMinY) sMinY = py
+                    if (px > sMaxX) sMaxX = px; if (py > sMaxY) sMaxY = py
+                    if (x < sMinX) sMinX = x; if (y < sMinY) sMinY = y
+                    if (x > sMaxX) sMaxX = x; if (y > sMaxY) sMaxY = y
                     layer.canvas.drawLineSize(px, py, x, y, c, brushSize, pixelPerfect)
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.ERASER -> {
-                    layer.canvas.drawLine(px, py, x, y, 0)
+                    val es = eraserSize
+                    if (es <= 1) layer.canvas.drawLine(px, py, x, y, 0)
+                    else {
+                        val r = es / 2
+                        var dx = Math.abs(x - px); var dy = Math.abs(y - py)
+                        val sx = if (px < x) 1 else -1; val sy = if (py < y) 1 else -1
+                        var cx = px; var cy = py; var err = dx + dy
+                        while (true) {
+                            var fy = cy - r
+                            while (fy <= cy + r) { var fx = cx - r; while (fx <= cx + r) { layer.canvas[fx, fy] = 0; fx++ }; fy++ }
+                            if (cx == x && cy == y) break
+                            val e2 = 2 * err
+                            if (e2 >= dy) { err -= dy; cx += sx }
+                            if (e2 <= dx) { err += dx; cy += sy }
+                        }
+                    }
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.SHAPE -> {
@@ -358,7 +400,11 @@ strokeSnapshot?.let { history.push(it) }
                 else -> {}
             }
             strokeSnapshot = null
-            if (t == Tool.PENCIL && pixelPerfect) layer.canvas.cleanPixelJoints(c)
+            ppPoints.clear()
+            if (t == Tool.PENCIL && pixelPerfect && ppMode == PpMode.EXTREME) {
+                layer.canvas.cleanPixelJoints(sMinX - 1, sMinY - 1, sMaxX + 1, sMaxY + 1, c)
+                doc.flatten()
+            }
             refreshHistoryFlags()
             requestRender()
             refreshThumbs()
@@ -372,6 +418,7 @@ strokeSnapshot?.let { history.push(it) }
             strokeSnapshot?.let { layer.canvas.restore(it) }
             strokeSnapshot = null
             lassoPath.clear()
+            ppPoints.clear()
             refreshHistoryFlags()
             requestRender()
             refreshThumbs()
@@ -505,6 +552,36 @@ strokeSnapshot?.let { history.push(it) }
         } else {
             brushSelectorOpen = !brushSelectorOpen
         }
+    }
+
+    fun onEraserToolTap() {
+        cancelPan()
+        if (tool != Tool.ERASER) {
+            selectTool(Tool.ERASER)
+            eraserSelectorOpen = true
+        } else {
+            eraserSelectorOpen = !eraserSelectorOpen
+        }
+    }
+
+    fun onBucketToolTap() {
+        cancelPan()
+        selectTool(Tool.BUCKET)
+    }
+
+    fun onSelectToolTap() {
+        cancelPan()
+        if (tool != Tool.SELECT) {
+            selectTool(Tool.SELECT)
+            selectSelectorOpen = true
+        } else {
+            selectSelectorOpen = !selectSelectorOpen
+        }
+    }
+
+    fun onSelectLongPress() {
+        selectMode = SelectMode.RECT
+        // TODO: select entire canvas
     }
 
     fun selectShapeMode(mode: ShapeMode) {

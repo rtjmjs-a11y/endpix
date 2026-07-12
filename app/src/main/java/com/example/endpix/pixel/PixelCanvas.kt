@@ -176,40 +176,71 @@ class PixelCanvas(val width: Int, val height: Int) {
     fun drawPixelPerfectLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
         val dx = Math.abs(x1 - x0)
         val dy = Math.abs(y1 - y0)
+        if (dx == 0 && dy == 0) { ppSet(x0, y0, color); return }
         val sx = if (x0 < x1) 1 else -1
         val sy = if (y0 < y1) 1 else -1
-        var err = dx - dy
         var x = x0
         var y = y0
-        while (true) {
-            this[x, y] = color
-            if (x == x1 && y == y1) break
-            val e2 = 2 * err
-            if (e2 > -dy) { err -= dy; x += sx }
-            if (e2 < dx)  { err += dx; y += sy }
+        if (dx > dy) {
+            var d = 2 * dy - dx
+            for (i in 0..dx) {
+                ppSet(x, y, color)
+                if (i == dx) break
+                if (d > 0) { y += sy; d -= 2 * dx }
+                x += sx; d += 2 * dy
+            }
+        } else {
+            var d = 2 * dx - dy
+            for (i in 0..dy) {
+                ppSet(x, y, color)
+                if (i == dy) break
+                if (d > 0) { x += sx; d -= 2 * dy }
+                y += sy; d += 2 * dx
+            }
         }
     }
+
+    private val strokePixels = HashSet<Long>()
+    private fun key(x: Int, y: Int) = (x.toLong() shl 32) or (y.toLong() and 0xFFFFFFFFL)
+
+    fun beginStroke() { strokePixels.clear() }
 
     fun ppSet(x: Int, y: Int, color: Int) {
         if (x < 0 || y < 0 || x >= width || y >= height) return
-        if (wouldCreate2x2(x, y, color)) {
-            return
-        }
         this[x, y] = color
+        strokePixels.add(key(x, y))
     }
 
-    fun cleanPixelJoints(color: Int) {
+    fun cleanPixelJoints(minX: Int, minY: Int, maxX: Int, maxY: Int, color: Int) {
+        val cx0 = maxOf(0, minX)
+        val cy0 = maxOf(0, minY)
+        val cx1 = minOf(width - 2, maxX)
+        val cy1 = minOf(height - 2, maxY)
         var found = true
-        while (found) {
+        var passes = 0
+        while (found && passes < 3) {
             found = false
-            var cy = 0
-            while (cy < height - 1) {
-                var cx = 0
-                while (cx < width - 1) {
-                    if (this[cx, cy] == color && this[cx + 1, cy] == color &&
-                        this[cx, cy + 1] == color && this[cx + 1, cy + 1] == color) {
-                        this[cx + 1, cy] = 0
-                        found = true
+            passes++
+            var cy = cy0
+            while (cy <= cy1) {
+                var cx = cx0
+                while (cx <= cx1) {
+                    val a = this[cx, cy] == color
+                    val b = this[cx + 1, cy] == color
+                    val c = this[cx, cy + 1] == color
+                    val d = this[cx + 1, cy + 1] == color
+                    val n = (if (a) 1 else 0) + (if (b) 1 else 0) + (if (c) 1 else 0) + (if (d) 1 else 0)
+                    if (n >= 3) {
+                        var rx = cx; var ry = cy
+                        if (n == 4 || !d)      { rx = cx;     ry = cy }
+                        else if (!a)            { rx = cx + 1; ry = cy + 1 }
+                        else if (!b)            { rx = cx;     ry = cy + 1 }
+                        else                   { rx = cx + 1; ry = cy }
+                        if (key(rx, ry) in strokePixels) {
+                            this[rx, ry] = 0
+                            strokePixels.remove(key(rx, ry))
+                            found = true
+                        }
                     }
                     cx++
                 }

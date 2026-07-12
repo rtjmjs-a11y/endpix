@@ -60,6 +60,8 @@ import com.example.endpix.R
 import com.example.endpix.gl.PixelGLSurfaceView
 import com.example.endpix.pixel.ExpandDir
 import com.example.endpix.pixel.PerfMode
+import com.example.endpix.pixel.PpMode
+import com.example.endpix.pixel.SelectMode
 import com.example.endpix.pixel.ShapeMode
 import com.example.endpix.pixel.ShortcutAction
 import com.example.endpix.pixel.Tool
@@ -76,6 +78,9 @@ fun EditorScreen(vm: EditorViewModel) {
 
     var shapeBtnY by remember { mutableStateOf(0f) }
     var pencilBtnY by remember { mutableStateOf(0f) }
+    var eraserBtnY by remember { mutableStateOf(0f) }
+    var bucketBtnY by remember { mutableStateOf(0f) }
+    var selectBtnY by remember { mutableStateOf(0f) }
     var boxY by remember { mutableStateOf(0f) }
     var topStripsH by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
@@ -121,7 +126,7 @@ fun EditorScreen(vm: EditorViewModel) {
             FrameStrip(vm)
         }
 
-        ToolColumn(vm, Modifier.align(Alignment.CenterStart), onShapePositioned = { shapeBtnY = it }, onPencilPositioned = { pencilBtnY = it })
+        ToolColumn(vm, Modifier.align(Alignment.CenterStart), onShapePositioned = { shapeBtnY = it }, onPencilPositioned = { pencilBtnY = it }, onEraserPositioned = { eraserBtnY = it }, onBucketPositioned = { bucketBtnY = it }, onSelectPositioned = { selectBtnY = it })
 
         PaletteBar(vm, Modifier.align(Alignment.CenterEnd))
 
@@ -137,6 +142,18 @@ fun EditorScreen(vm: EditorViewModel) {
         if (vm.tool == Tool.PENCIL && vm.brushSelectorOpen) {
             val offsetDp = with(density) { (pencilBtnY - boxY).coerceAtLeast(0f).toDp() }
             BrushSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
+        }
+        if (vm.tool == Tool.ERASER && vm.eraserSelectorOpen) {
+            val offsetDp = with(density) { (eraserBtnY - boxY).coerceAtLeast(0f).toDp() }
+            EraserSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
+        }
+        if (vm.tool == Tool.BUCKET) {
+            val offsetDp = with(density) { (bucketBtnY - boxY).coerceAtLeast(0f).toDp() }
+            BucketSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
+        }
+        if (vm.tool == Tool.SELECT && vm.selectSelectorOpen) {
+            val offsetDp = with(density) { (selectBtnY - boxY).coerceAtLeast(0f).toDp() }
+            SelectSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
         }
     }
 
@@ -260,7 +277,7 @@ private fun FrameStrip(vm: EditorViewModel) {
 }
 
 @Composable
-private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onShapePositioned: (Float) -> Unit, onPencilPositioned: (Float) -> Unit) {
+private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onShapePositioned: (Float) -> Unit, onPencilPositioned: (Float) -> Unit, onEraserPositioned: (Float) -> Unit, onBucketPositioned: (Float) -> Unit, onSelectPositioned: (Float) -> Unit) {
     val shapeIcon = when (vm.shapeMode) {
         ShapeMode.LINE -> R.drawable.ic_line
         ShapeMode.RECTANGLE -> if (vm.shapeFill) R.drawable.ic_rect_filled else R.drawable.ic_rect
@@ -268,35 +285,36 @@ private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onSha
         ShapeMode.LEAF -> if (vm.shapeFill) R.drawable.ic_leaf_filled else R.drawable.ic_leaf
         ShapeMode.LASSO -> R.drawable.ic_lasso
     }
-    val tools = listOf(
-        Tool.PENCIL to R.drawable.ic_pencil,
-        Tool.ERASER to R.drawable.ic_eraser,
-        Tool.BUCKET to R.drawable.ic_bucket,
-        Tool.EYEDROPPER to R.drawable.ic_eyedropper
-    )
     Column(
         modifier = modifier.width(48.dp).fillMaxHeight().padding(4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.weight(1f))
-        tools.forEach { (tool, icon) ->
-        Box(modifier = if (tool == Tool.PENCIL) Modifier.onGloballyPositioned { onPencilPositioned(it.positionInRoot().y) } else Modifier) {
-            IconSquareButton(iconRes = icon, selected = vm.tool == tool, size = 40) {
-                if (tool == Tool.PENCIL) vm.onPencilToolTap() else vm.selectTool(tool)
-            }
-            if (tool == Tool.PENCIL && vm.brushSize > 1) {
+        Box(modifier = Modifier.onGloballyPositioned { onPencilPositioned(it.positionInRoot().y) }) {
+            IconSquareButton(iconRes = R.drawable.ic_pencil, selected = vm.tool == Tool.PENCIL, size = 40) { vm.onPencilToolTap() }
+            if (vm.tool == Tool.PENCIL && vm.brushSize > 1 && !vm.pixelPerfect) {
                 Text("${vm.brushSize}", color = Color(0xFF64B5F6), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = -2.dp)
-                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xDD1A1A1E))
-                        .padding(horizontal = 3.dp))
+                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xDD1A1A1E)).padding(horizontal = 3.dp))
             }
         }
-    }
+        Box(modifier = Modifier.onGloballyPositioned { onEraserPositioned(it.positionInRoot().y) }) {
+            IconSquareButton(iconRes = R.drawable.ic_eraser, selected = vm.tool == Tool.ERASER, size = 40) { vm.onEraserToolTap() }
+            if (vm.tool == Tool.ERASER && vm.eraserSize > 1) {
+                Text("${vm.eraserSize}", color = Color(0xFF64B5F6), style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = -2.dp)
+                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xDD1A1A1E)).padding(horizontal = 3.dp))
+            }
+        }
+        Box(modifier = Modifier.onGloballyPositioned { onBucketPositioned(it.positionInRoot().y) }) {
+            IconSquareButton(iconRes = R.drawable.ic_bucket, selected = vm.tool == Tool.BUCKET, size = 40) { vm.onBucketToolTap() }
+        }
+        Box(modifier = Modifier.onGloballyPositioned { onSelectPositioned(it.positionInRoot().y) }) {
+            IconSquareButton(iconRes = R.drawable.ic_eyedropper, selected = vm.tool == Tool.SELECT, size = 40) { vm.onSelectToolTap() }
+        }
         IconSquareButton(
-            iconRes = shapeIcon,
-            selected = vm.tool == Tool.SHAPE,
-            size = 40,
+            iconRes = shapeIcon, selected = vm.tool == Tool.SHAPE, size = 40,
             modifier = Modifier.onGloballyPositioned { onShapePositioned(it.positionInRoot().y) }
         ) { vm.onShapeToolTap() }
         Spacer(Modifier.weight(1f))
@@ -496,16 +514,72 @@ private fun BrushSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
         modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text("画笔大小: ${vm.brushSize}", color = Color.White, style = MaterialTheme.typography.labelSmall)
+        val ppDisabled = vm.pixelPerfect
+        Text("画笔大小: ${if (ppDisabled) 1 else vm.brushSize}", color = if (ppDisabled) Color.Gray else Color.White, style = MaterialTheme.typography.labelSmall)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp).width(160.dp)) {
             Text("1", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
-            Slider(value = vm.brushSize.toFloat(), onValueChange = { vm.brushSize = it.toInt().coerceIn(1, 10) }, valueRange = 1f..10f, steps = 8, modifier = Modifier.weight(1f))
+            Slider(value = if (ppDisabled) 1f else vm.brushSize.toFloat(), onValueChange = { if (!ppDisabled) vm.brushSize = it.toInt().coerceIn(1, 10) }, valueRange = 1f..10f, steps = 8, modifier = Modifier.weight(1f), enabled = !ppDisabled)
             Text("10", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
         }
         Text("像素完美(1px)", color = if (vm.pixelPerfect) Color.Black else Color.White, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.width(160.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                 .background(if (vm.pixelPerfect) MaterialTheme.colorScheme.primary else Color.Transparent)
                 .clickable { vm.pixelPerfect = !vm.pixelPerfect }.padding(horizontal = 6.dp, vertical = 6.dp))
+        if (vm.pixelPerfect) {
+            Row(modifier = Modifier.width(160.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                PpMode.entries.forEach { mode ->
+                    val sel = vm.ppMode == mode
+                    Text(mode.label, color = if (sel) Color.Black else Color.White, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                            .background(if (sel) MaterialTheme.colorScheme.primary else Color(0xFF2A2A2E))
+                            .clickable { vm.ppMode = mode }.padding(vertical = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EraserSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("橡皮擦大小: ${vm.eraserSize}", color = Color.White, style = MaterialTheme.typography.labelSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(24.dp).width(160.dp)) {
+            Text("1", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+            Slider(value = vm.eraserSize.toFloat(), onValueChange = { vm.eraserSize = it.toInt().coerceIn(1, 10) }, valueRange = 1f..10f, steps = 8, modifier = Modifier.weight(1f))
+            Text("10", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun BucketSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("移除像素", color = if (vm.bucketRemovePixels) Color.Black else Color.White, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.width(160.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                .background(if (vm.bucketRemovePixels) MaterialTheme.colorScheme.primary else Color.Transparent)
+                .clickable { vm.bucketRemovePixels = !vm.bucketRemovePixels }.padding(horizontal = 6.dp, vertical = 6.dp))
+    }
+}
+
+@Composable
+private fun SelectSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        SelectMode.entries.forEach { mode ->
+            val sel = vm.selectMode == mode
+            Text(if (mode == SelectMode.RECT) "方形选择" else "套索选择", color = if (sel) Color.Black else Color.White, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.width(160.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                    .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .clickable { vm.selectMode = mode }.padding(horizontal = 6.dp, vertical = 6.dp))
+        }
     }
 }
 

@@ -6,8 +6,18 @@ enum class Tool {
     PENCIL,
     ERASER,
     BUCKET,
-    EYEDROPPER,
+    SELECT,
     SHAPE
+}
+
+enum class SelectMode {
+    RECT,
+    LASSO
+}
+
+enum class PpMode(val label: String) {
+    NORMAL("正常"),
+    EXTREME("极端")
 }
 
 enum class ShapeMode {
