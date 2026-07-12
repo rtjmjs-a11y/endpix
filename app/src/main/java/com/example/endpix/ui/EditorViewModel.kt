@@ -69,6 +69,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     var bucketRemovePixels by mutableStateOf(false)
     var selectSelectorOpen by mutableStateOf(false)
     var selectMode by mutableStateOf(SelectMode.RECT)
+    var hasSelection by mutableStateOf(false)
+    var selX0 by mutableIntStateOf(0); var selY0 by mutableIntStateOf(0)
+    var selX1 by mutableIntStateOf(0); var selY1 by mutableIntStateOf(0)
+    private var selSnapshot: IntArray? = null
+    private val selLassoPath = ArrayList<IntArray>()
     var perfMode by mutableStateOf(PerfMode.REGION)
     var uiCornerRadius by mutableFloatStateOf(8f)
     var hardwareAcceleration by mutableStateOf(false)
@@ -273,7 +278,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.SELECT -> {
-                    // selection handled in onStrokeMove/Up
+                    if (hasSelection) {
+                        confirmSelection(layer, doc)
+                    } else {
+                        selLassoPath.clear()
+                    }
                 }
                 Tool.SHAPE -> {
                     strokeSnapshot = layer.canvas.snapshot()
@@ -355,6 +364,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
                     }
                     doc.flatten()
                 }
+                Tool.SELECT -> {
+                    if (!hasSelection) {
+                        if (selectMode == SelectMode.RECT) {
+                            selX0 = minOf(ax, x); selY0 = minOf(ay, y)
+                            selX1 = maxOf(ax, x); selY1 = maxOf(ay, y)
+                        } else {
+                            selLassoPath.add(intArrayOf(x, y))
+                        }
+                    }
+                }
                 else -> {}
             }
             requestRender()
@@ -396,6 +415,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
 strokeSnapshot?.let { history.push(it) }
                     }
                     doc.flatten()
+                }
+                Tool.SELECT -> {
+                    if (!hasSelection) {
+                        if (selectMode == SelectMode.RECT) {
+                            selX0 = minOf(ax, x); selY0 = minOf(ay, y)
+                            selX1 = maxOf(ax, x); selY1 = maxOf(ay, y)
+                        } else {
+                            selLassoPath.add(intArrayOf(x, y))
+                            selX0 = selLassoPath.minOf { it[0] }; selY0 = selLassoPath.minOf { it[1] }
+                            selX1 = selLassoPath.maxOf { it[0] }; selY1 = selLassoPath.maxOf { it[1] }
+                        }
+                        if (selX1 > selX0 && selY1 > selY0) {
+                            selSnapshot = layer.canvas.snapshot()
+                            hasSelection = true
+                        }
+                    }
                 }
                 else -> {}
             }
@@ -581,7 +616,30 @@ strokeSnapshot?.let { history.push(it) }
 
     fun onSelectLongPress() {
         selectMode = SelectMode.RECT
-        // TODO: select entire canvas
+        selX0 = 0; selY0 = 0; selX1 = activeDoc.width - 1; selY1 = activeDoc.height - 1
+        selSnapshot = activeLayer().canvas.snapshot()
+        hasSelection = true
+    }
+
+    fun confirmSelection(layer: Layer, doc: Document) {
+        selSnapshot = null
+        selLassoPath.clear()
+        hasSelection = false
+        doc.flatten()
+    }
+
+    fun cancelSelection(layer: Layer, doc: Document) {
+        selSnapshot?.let { layer.canvas.restore(it) }
+        selSnapshot = null
+        selLassoPath.clear()
+        hasSelection = false
+        doc.flatten()
+        requestRender()
+    }
+
+    fun copySelection(layer: Layer, doc: Document) {
+        doc.flatten()
+        requestRender()
     }
 
     fun selectShapeMode(mode: ShapeMode) {

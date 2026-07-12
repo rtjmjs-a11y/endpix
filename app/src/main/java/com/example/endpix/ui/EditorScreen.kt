@@ -311,7 +311,8 @@ private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onSha
             IconSquareButton(iconRes = R.drawable.ic_bucket, selected = vm.tool == Tool.BUCKET, size = 40) { vm.onBucketToolTap() }
         }
         Box(modifier = Modifier.onGloballyPositioned { onSelectPositioned(it.positionInRoot().y) }) {
-            IconSquareButton(iconRes = R.drawable.ic_eyedropper, selected = vm.tool == Tool.SELECT, size = 40) { vm.onSelectToolTap() }
+            val selIcon = if (vm.selectMode == SelectMode.RECT) R.drawable.ic_select_rect else R.drawable.ic_select_lasso
+            IconSquareButton(iconRes = selIcon, selected = vm.tool == Tool.SELECT, size = 40) { vm.onSelectToolTap() }
         }
         IconSquareButton(
             iconRes = shapeIcon, selected = vm.tool == Tool.SHAPE, size = 40,
@@ -569,6 +570,8 @@ private fun BucketSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SelectSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    val layer = vm.activeLayer()
+    val doc = vm.activeDoc
     Column(
         modifier = modifier.clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xE62A2A2E)).padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -579,6 +582,20 @@ private fun SelectSelector(vm: EditorViewModel, modifier: Modifier = Modifier) {
                 modifier = Modifier.width(160.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
                     .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .clickable { vm.selectMode = mode }.padding(horizontal = 6.dp, vertical = 6.dp))
+        }
+        if (vm.hasSelection) {
+            Spacer(Modifier.height(2.dp).width(70.dp).background(Color(0x66FFFFFF)))
+            Row(modifier = Modifier.width(160.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("确认", color = Color.Black, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                        .background(Color(0xFF4CAF50)).clickable { vm.confirmSelection(layer, doc) }.padding(vertical = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("复制", color = Color.Black, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                        .background(Color(0xFF2196F3)).clickable { vm.copySelection(layer, doc) }.padding(vertical = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("取消", color = Color.Black, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp))
+                        .background(Color(0xFFF44336)).clickable { vm.cancelSelection(layer, doc) }.padding(vertical = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
         }
     }
 }
