@@ -7,6 +7,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -36,14 +41,24 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -154,6 +169,13 @@ fun EditorScreen(vm: EditorViewModel) {
         if (vm.tool == Tool.SELECT && vm.selectSelectorOpen) {
             val offsetDp = with(density) { (selectBtnY - boxY).coerceAtLeast(0f).toDp() }
             SelectSelector(vm, Modifier.align(Alignment.TopStart).offset(x = 52.dp, y = offsetDp))
+        }
+    }
+
+    if (vm.showColorPicker) {
+        val idx = vm.pickerIndex
+        if (idx in vm.palette.indices) {
+            ColorPickerDialog(vm.palette[idx], { vm.commitColorPicker(it) }, { vm.showColorPicker = false })
         }
     }
 
@@ -324,21 +346,32 @@ private fun ToolColumn(vm: EditorViewModel, modifier: Modifier = Modifier, onSha
 
 @Composable
 private fun PaletteBar(vm: EditorViewModel, modifier: Modifier = Modifier) {
+    var popupIdx by remember { mutableIntStateOf(-1) }
     Column(
         modifier = modifier.width(48.dp).fillMaxHeight().padding(4.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        vm.palette.forEach { c ->
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 2.dp)
-                    .size(30.dp)
-                    .clip(RoundedCornerShape(LocalCornerRadius.current.dp))
-                    .background(Color(c))
-                    .border(width = if (vm.color == c) 2.dp else 1.dp, color = if (vm.color == c) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), shape = RoundedCornerShape(LocalCornerRadius.current.dp))
-                    .clickable { vm.selectColor(c) }
-            )
+        vm.palette.forEachIndexed { idx, c ->
+            Box(modifier = Modifier) {
+                Box(
+                    modifier = Modifier.padding(vertical = 2.dp).size(30.dp)
+                        .clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(c))
+                        .border(width = if (vm.color == c) 2.dp else 1.dp, color = if (vm.color == c) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3E), shape = RoundedCornerShape(LocalCornerRadius.current.dp))
+                        .combinedClickable(
+                            onClick = { if (vm.eyedropperActive) { vm.selectColor(c); vm.eyedropperActive = false } else popupIdx = idx },
+                            onLongClick = { vm.selectColor(c) }
+                        )
+                )
+                DropdownMenu(expanded = popupIdx == idx, onDismissRequest = { popupIdx = -1 }) {
+                    DropdownMenuItem(text = { Row { Icon(painterResource(R.drawable.ic_palette), null, Modifier.size(18.dp), tint = Color.White); Spacer(Modifier.width(8.dp)); Text("调色盘", color = Color.White) } }, onClick = { popupIdx = -1; vm.openColorPicker(idx) })
+                    DropdownMenuItem(text = { Row { Icon(painterResource(R.drawable.ic_eyedropper), null, Modifier.size(18.dp), tint = Color.White); Spacer(Modifier.width(8.dp)); Text("取色器", color = Color.White) } }, onClick = { popupIdx = -1; vm.eyedropperActive = true })
+                }
+            }
+        }
+        if (vm.eyedropperActive) {
+            Spacer(Modifier.size(4.dp))
+            Icon(painterResource(R.drawable.ic_eyedropper), "取色中", tint = Color(0xFF64B5F6), modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -833,4 +866,104 @@ private fun SettingsDialog(vm: EditorViewModel) {
             }
         }
     )
+}
+
+@Composable
+private fun ColorPickerDialog(initialColor: Int, onConfirm: (Int) -> Unit, onDismiss: () -> Unit) {
+    var h by remember { mutableFloatStateOf(0f) }
+    var s by remember { mutableFloatStateOf(0f) }
+    var v by remember { mutableFloatStateOf(0f) }
+    var a by remember { mutableFloatStateOf(1f) }
+    var hexText by remember { mutableStateOf("") }
+    val initA = Color(initialColor).alpha
+    val initHsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(Color(initialColor).red.toInt(),Color(initialColor).green.toInt(),Color(initialColor).blue.toInt(),initHsv)
+    LaunchedEffect(initialColor) { h=initHsv[0]; s=initHsv[1]; v=initHsv[2]; a=initA }
+    if (hexText.isBlank()) { val c = Color.hsv(h,s,v,a); hexText = String.format("#%02X%02X%02X",(c.red*255).toInt(),(c.green*255).toInt(),(c.blue*255).toInt()) }
+    val newColor = Color.hsv(h,s,v,a)
+    val newArgb = (a*255).toInt() shl 24 or ((newColor.red*255).toInt() shl 16) or ((newColor.green*255).toInt() shl 8) or (newColor.blue*255).toInt()
+    val sq = 240.dp
+    AlertDialog(onDismissRequest = onDismiss, confirmButton = {}, dismissButton = {},
+        shape = RoundedCornerShape(LocalCornerRadius.current.dp),
+        text = { Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HueBar(Modifier.width(28.dp).height(sq).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h) { h = it; hexText = "" }
+                Spacer(Modifier.width(6.dp))
+                SvSquare(Modifier.size(sq).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h, s, v) { ns, nv -> s = ns; v = nv; hexText = "" }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(sq + 34.dp)) {
+                Canvas(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))) {
+                    drawRect(Color(initialColor))
+                    val path = Path().apply { moveTo(size.width, 0f); lineTo(0f, size.height); lineTo(size.width, size.height); close() }
+                    drawPath(path, newColor)
+                }
+                Spacer(Modifier.width(6.dp))
+                AlphaBar(Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h, s, v, a) { a = it; hexText = "" }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val clip = LocalClipboardManager.current
+                Box(Modifier.border(1.dp,Color(0x66FFFFFF),RoundedCornerShape(LocalCornerRadius.current.dp)).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0x18FFFFFF))) {
+                    BasicTextField(value = hexText, onValueChange = { txt ->
+                        val clean = txt.replace("#","").take(8)
+                        hexText = "#$clean"
+                        if (clean.length == 6 || clean.length == 8) { try { val c = android.graphics.Color.parseColor(if (clean.length == 6) clean else clean.takeLast(6)); val hv = FloatArray(3); android.graphics.Color.RGBToHSV((c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF, hv); h=hv[0];s=hv[1];v=hv[2]; if (clean.length == 8) a = ((Integer.parseInt(clean.take(2),16))/255f).coerceIn(0f,1f) } catch (_:Exception){} }
+                    }, singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = Color.White),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp).widthIn(min = 70.dp)
+                            .pointerInput(Unit) { detectTapGestures(onLongPress = { clip.setText(AnnotatedString(hexText)) }) }
+                    )
+                }
+            }
+            Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp).offset(y = 4.dp)) {
+                Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                    Box(Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xFF4CAF50)).clickable { onConfirm(newArgb) }.padding(vertical = 14.dp), contentAlignment = Alignment.Center) {
+                        Text("确定", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                    }
+                    Spacer(Modifier.width(24.dp))
+                    Box(Modifier.weight(1f).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xFFF44336)).clickable { onDismiss() }.padding(vertical = 14.dp), contentAlignment = Alignment.Center) {
+                        Text("取消", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+            }
+        } }
+    )
+}
+
+@Composable
+private fun HueBar(modifier: Modifier, hue: Float, onHueChanged: (Float) -> Unit) {
+    val hueColors = remember { (0..360 step 30).map { Color.hsv(it.toFloat(),1f,1f) }.toList() }
+    Canvas(modifier = modifier.pointerInput(Unit) {
+        detectTapGestures { onHueChanged((1f-(it.y/size.height).coerceIn(0f,1f))) }
+        detectDragGestures { change, _ -> change.consume(); onHueChanged((1f-(change.position.y/size.height).coerceIn(0f,1f))) }
+    }) {
+        drawRect(Brush.verticalGradient(hueColors))
+        drawRect(Color.White, Offset(size.width * 0.1f, (1f-hue)*size.height - 1.5f), Size(size.width * 0.8f, 3f))
+    }
+}
+
+@Composable
+private fun SvSquare(modifier: Modifier, hue: Float, sat: Float, val_: Float, onSvChanged: (Float, Float) -> Unit) {
+    val hueColor = Color.hsv(hue, 1f, 1f)
+    Canvas(modifier = modifier.pointerInput(Unit) {
+        detectTapGestures { val sx=(it.x/size.width).coerceIn(0f,1f); val vy=1f-(it.y/size.height).coerceIn(0f,1f); onSvChanged(sx,vy) }
+        detectDragGestures { change, _ -> change.consume(); val sx=(change.position.x/size.width).coerceIn(0f,1f); val vy=1f-(change.position.y/size.height).coerceIn(0f,1f); onSvChanged(sx,vy) }
+    }) {
+        drawRect(Brush.horizontalGradient(listOf(Color.White, hueColor)))
+        drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
+        drawCircle(Color.White, radius = 7f, center = Offset(sat*size.width, (1f-val_)*size.height))
+        drawCircle(Color.Black, radius = 5.5f, center = Offset(sat*size.width, (1f-val_)*size.height))
+    }
+}
+
+@Composable
+private fun AlphaBar(modifier: Modifier, hue: Float, sat: Float, val_: Float, alpha: Float, onAlphaChanged: (Float) -> Unit) {
+    val color = Color.hsv(hue, sat, val_, 1f)
+    Canvas(modifier = modifier.pointerInput(Unit) {
+        detectTapGestures { onAlphaChanged((it.x/size.width).coerceIn(0f,1f)) }
+        detectDragGestures { change, _ -> change.consume(); onAlphaChanged((change.position.x/size.width).coerceIn(0f,1f)) }
+    }) {
+        val sq = 4f; val n = (size.width/sq).toInt(); val m = (size.height/sq).toInt()
+        for (dx in 0 until n) for (dy in 0 until m) drawRect(if((dx+dy)%2==0) Color.White else Color.Gray, Offset(dx*sq,dy*sq), Size(sq,sq))
+        drawRect(Brush.horizontalGradient(listOf(Color.Transparent, color)))
+        drawRect(Color.White, Offset(alpha*size.width - 1.5f, size.height*0.1f), Size(3f, size.height*0.8f))
+    }
 }
