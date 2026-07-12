@@ -176,28 +176,58 @@ class PixelCanvas(val width: Int, val height: Int) {
     fun drawPixelPerfectLine(x0: Int, y0: Int, x1: Int, y1: Int, color: Int) {
         val dx = Math.abs(x1 - x0)
         val dy = Math.abs(y1 - y0)
-        if (dx == 0 && dy == 0) { this[x0, y0] = color; return }
         val sx = if (x0 < x1) 1 else -1
         val sy = if (y0 < y1) 1 else -1
+        var err = dx - dy
         var x = x0
         var y = y0
-        if (dx > dy) {
-            var d = 2 * dy - dx
-            for (i in 0..dx) {
-                this[x, y] = color
-                if (i == dx) break
-                if (d > 0) { y += sy; d -= 2 * dx }
-                x += sx; d += 2 * dy
-            }
-        } else {
-            var d = 2 * dx - dy
-            for (i in 0..dy) {
-                this[x, y] = color
-                if (i == dy) break
-                if (d > 0) { x += sx; d -= 2 * dy }
-                y += sy; d += 2 * dx
+        while (true) {
+            this[x, y] = color
+            if (x == x1 && y == y1) break
+            val e2 = 2 * err
+            if (e2 > -dy) { err -= dy; x += sx }
+            if (e2 < dx)  { err += dx; y += sy }
+        }
+    }
+
+    fun ppSet(x: Int, y: Int, color: Int) {
+        if (x < 0 || y < 0 || x >= width || y >= height) return
+        if (wouldCreate2x2(x, y, color)) {
+            return
+        }
+        this[x, y] = color
+    }
+
+    fun cleanPixelJoints(color: Int) {
+        var found = true
+        while (found) {
+            found = false
+            var cy = 0
+            while (cy < height - 1) {
+                var cx = 0
+                while (cx < width - 1) {
+                    if (this[cx, cy] == color && this[cx + 1, cy] == color &&
+                        this[cx, cy + 1] == color && this[cx + 1, cy + 1] == color) {
+                        this[cx + 1, cy] = 0
+                        found = true
+                    }
+                    cx++
+                }
+                cy++
             }
         }
+    }
+
+    private fun wouldCreate2x2(x: Int, y: Int, color: Int): Boolean {
+        fun isC(xx: Int, yy: Int) = safeGet(xx, yy) == color
+        return (isC(x - 1, y - 1) && isC(x, y - 1) && isC(x - 1, y)) ||
+               (isC(x + 1, y - 1) && isC(x, y - 1) && isC(x + 1, y)) ||
+               (isC(x - 1, y + 1) && isC(x, y + 1) && isC(x - 1, y)) ||
+               (isC(x + 1, y + 1) && isC(x, y + 1) && isC(x + 1, y))
+    }
+
+    private fun safeGet(x: Int, y: Int): Int {
+        return if (x in 0 until width && y in 0 until height) this[x, y] else 0
     }
 
     fun drawLineSize(x0: Int, y0: Int, x1: Int, y1: Int, color: Int, size: Int, pixelPerfect: Boolean) {

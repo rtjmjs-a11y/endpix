@@ -112,7 +112,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
     private var anchorY = 0
     private var strokeSnapshot: IntArray? = null
     private val lassoPath = ArrayList<IntArray>()
-    private val strokePixels = HashSet<Long>()
 
     init {
         val saved = loadState()
@@ -225,12 +224,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
             when (t) {
                 Tool.PENCIL -> {
                     val sz = brushSize
-                    val pp = pixelPerfect
                     history.push(layer.canvas.snapshot())
-                    strokePixels.clear()
-                    if (sz <= 1 || pp) {
+                    if (sz <= 1 || pixelPerfect) {
                         layer.canvas[x, y] = c
-                        if (pp) strokePixels.add((x.toLong() shl 32) or (y.toLong() and 0xFFFFFFFFL))
                     } else {
                         val r = sz / 2
                         var fy = y - r
@@ -288,53 +284,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app), StrokeListener 
         glView?.queueEvent {
             when (t) {
                 Tool.PENCIL -> {
-                    val pp = pixelPerfect
-                    if (pp) layer.canvas[px, py] = 0
-                    layer.canvas.drawLineSize(px, py, x, y, c, brushSize, pp)
-                    if (pp) {
-                        val dx = Math.abs(x - px); val dy = Math.abs(y - py)
-                        val sx = if (px < x) 1 else -1; val sy = if (py < y) 1 else -1
-                        var cx = px; var cy = py
-                        if (dx > dy) {
-                            var d = 2 * dy - dx
-                            while (true) {
-                                val key = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                if (cx != px || cy != py) {
-                                    val ax1 = cx - 1; val ak1 = (ax1.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                    if (ak1 in strokePixels) { layer.canvas[ax1, cy] = 0; strokePixels.remove(ak1) }
-                                    val ax2 = cx + 1; val ak2 = (ax2.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                    if (ak2 in strokePixels) { layer.canvas[ax2, cy] = 0; strokePixels.remove(ak2) }
-                                    val ay1 = cy - 1; val ak3 = (cx.toLong() shl 32) or (ay1.toLong() and 0xFFFFFFFFL)
-                                    if (ak3 in strokePixels) { layer.canvas[cx, ay1] = 0; strokePixels.remove(ak3) }
-                                    val ay2 = cy + 1; val ak4 = (cx.toLong() shl 32) or (ay2.toLong() and 0xFFFFFFFFL)
-                                    if (ak4 in strokePixels) { layer.canvas[cx, ay2] = 0; strokePixels.remove(ak4) }
-                                }
-                                strokePixels.add(key)
-                                if (cx == x && cy == y) break
-                                if (d > 0) { cy += sy; d -= 2 * dx }
-                                cx += sx; d += 2 * dy
-                            }
-                        } else {
-                            var d = 2 * dx - dy
-                            while (true) {
-                                val key = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                if (cx != px || cy != py) {
-                                    val ax1 = cx - 1; val ak1 = (ax1.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                    if (ak1 in strokePixels) { layer.canvas[ax1, cy] = 0; strokePixels.remove(ak1) }
-                                    val ax2 = cx + 1; val ak2 = (ax2.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
-                                    if (ak2 in strokePixels) { layer.canvas[ax2, cy] = 0; strokePixels.remove(ak2) }
-                                    val ay1 = cy - 1; val ak3 = (cx.toLong() shl 32) or (ay1.toLong() and 0xFFFFFFFFL)
-                                    if (ak3 in strokePixels) { layer.canvas[cx, ay1] = 0; strokePixels.remove(ak3) }
-                                    val ay2 = cy + 1; val ak4 = (cx.toLong() shl 32) or (ay2.toLong() and 0xFFFFFFFFL)
-                                    if (ak4 in strokePixels) { layer.canvas[cx, ay2] = 0; strokePixels.remove(ak4) }
-                                }
-                                strokePixels.add(key)
-                                if (cx == x && cy == y) break
-                                if (d > 0) { cx += sx; d -= 2 * dy }
-                                cy += sy; d += 2 * dx
-                            }
-                        }
-                    }
+                    layer.canvas.drawLineSize(px, py, x, y, c, brushSize, pixelPerfect)
                     applyFlush(layer.canvas, doc)
                 }
                 Tool.ERASER -> {
@@ -408,6 +358,7 @@ strokeSnapshot?.let { history.push(it) }
                 else -> {}
             }
             strokeSnapshot = null
+            if (t == Tool.PENCIL && pixelPerfect) layer.canvas.cleanPixelJoints(c)
             refreshHistoryFlags()
             requestRender()
             refreshThumbs()
@@ -537,6 +488,7 @@ strokeSnapshot?.let { history.push(it) }
     }
 
     fun onShapeToolTap() {
+        cancelPan()
         if (tool != Tool.SHAPE) {
             selectTool(Tool.SHAPE)
             shapeSelectorOpen = true
@@ -546,6 +498,7 @@ strokeSnapshot?.let { history.push(it) }
     }
 
     fun onPencilToolTap() {
+        cancelPan()
         if (tool != Tool.PENCIL) {
             selectTool(Tool.PENCIL)
             brushSelectorOpen = true

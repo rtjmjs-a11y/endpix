@@ -3,13 +3,30 @@ package com.example.endpix.gl
 import android.content.Context
 import android.opengl.GLSurfaceView
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import kotlin.math.hypot
+import kotlin.math.max
 
-interface StrokeListener {
-    fun onStrokeDown(canvasX: Float, canvasY: Float)
-    fun onStrokeMove(canvasX: Float, canvasY: Float)
-    fun onStrokeUp(canvasX: Float, canvasY: Float)
-    fun onStrokeCancel()
+object DebugLog {
+    var dir: java.io.File? = null
+    private val buf = StringBuilder()
+    private var lastFlush = 0L
+    fun log(msg: String) {
+        synchronized(buf) { buf.append(msg).append('\n') }
+        val now = System.currentTimeMillis()
+        if (now - lastFlush > 2000) {
+            lastFlush = now
+            tryWrite()
+        }
+    }
+    fun flush() { tryWrite() }
+    private fun tryWrite() {
+        val d = dir ?: return
+        try {
+            val f = java.io.File(d, "endpix_dbg.txt")
+            f.appendText(synchronized(buf) { val s = buf.toString(); buf.clear(); s })
+        } catch (_: Exception) {}
+    }
 }
 
 class PixelGLSurfaceView(
@@ -34,6 +51,7 @@ class PixelGLSurfaceView(
         setEGLContextClientVersion(3)
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
+        DebugLog.dir = context.filesDir
     }
 
     private fun toCanvas(x: Float, y: Float): FloatArray = renderer.screenToCanvas(x, y)
@@ -158,4 +176,11 @@ class PixelGLSurfaceView(
         private const val PAN = 2
         private const val PINCH = 3
     }
+}
+
+interface StrokeListener {
+    fun onStrokeDown(canvasX: Float, canvasY: Float)
+    fun onStrokeMove(canvasX: Float, canvasY: Float)
+    fun onStrokeUp(canvasX: Float, canvasY: Float)
+    fun onStrokeCancel()
 }
