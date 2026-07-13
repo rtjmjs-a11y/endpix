@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,7 +56,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -882,23 +886,23 @@ private fun ColorPickerDialog(initialColor: Int, onConfirm: (Int) -> Unit, onDis
     if (hexText.isBlank()) { val c = Color.hsv(h,s,v,a); hexText = String.format("#%02X%02X%02X",(c.red*255).toInt(),(c.green*255).toInt(),(c.blue*255).toInt()) }
     val newColor = Color.hsv(h,s,v,a)
     val newArgb = (a*255).toInt() shl 24 or ((newColor.red*255).toInt() shl 16) or ((newColor.green*255).toInt() shl 8) or (newColor.blue*255).toInt()
-    val sq = 240.dp
-    AlertDialog(onDismissRequest = onDismiss, confirmButton = {}, dismissButton = {},
-        shape = RoundedCornerShape(LocalCornerRadius.current.dp),
-        text = { Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    val sq = 360.dp
+    val bar = 36.dp
+    Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.padding(10.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)).background(Color(0xFF1E1E22)).padding(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                HueBar(Modifier.width(28.dp).height(sq).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h) { h = it; hexText = "" }
+                HueBar(Modifier.width(bar).height(sq).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h) { h = it; hexText = "" }
                 Spacer(Modifier.width(6.dp))
                 SvSquare(Modifier.size(sq).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h, s, v) { ns, nv -> s = ns; v = nv; hexText = "" }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(sq + 34.dp)) {
-                Canvas(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp))) {
-                    drawRect(Color(initialColor))
-                    val path = Path().apply { moveTo(size.width, 0f); lineTo(0f, size.height); lineTo(size.width, size.height); close() }
-                    drawPath(path, newColor)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(sq + bar + 6.dp)) {
+                Box(modifier = Modifier.size(bar)) {
+                    Box(Modifier.size(bar / 2).clip(RoundedCornerShape(LocalCornerRadius.current.dp / 2)).background(Color(initialColor)).align(Alignment.TopStart))
+                    Box(Modifier.size(bar / 2).clip(RoundedCornerShape(LocalCornerRadius.current.dp / 2)).background(newColor).align(Alignment.BottomEnd))
                 }
                 Spacer(Modifier.width(6.dp))
-                AlphaBar(Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h, s, v, a) { a = it; hexText = "" }
+                AlphaBar(Modifier.weight(1f).height(bar).clip(RoundedCornerShape(LocalCornerRadius.current.dp)), h, s, v, a) { a = it; hexText = "" }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val clip = LocalClipboardManager.current
@@ -924,33 +928,94 @@ private fun ColorPickerDialog(initialColor: Int, onConfirm: (Int) -> Unit, onDis
                     }
                 }
             }
-        } }
-    )
+        }
+    }
+}
 }
 
 @Composable
 private fun HueBar(modifier: Modifier, hue: Float, onHueChanged: (Float) -> Unit) {
     val hueColors = remember { (0..360 step 30).map { Color.hsv(it.toFloat(),1f,1f) }.toList() }
     Canvas(modifier = modifier.pointerInput(Unit) {
-        detectTapGestures { onHueChanged((1f-(it.y/size.height).coerceIn(0f,1f))) }
-        detectDragGestures { change, _ -> change.consume(); onHueChanged((1f-(change.position.y/size.height).coerceIn(0f,1f))) }
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitFirstDown()
+                down.consume()
+                onHueChanged((1f - (down.position.y / size.height).coerceIn(0f, 1f)))
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    change.consume()
+                    onHueChanged((1f - (change.position.y / size.height).coerceIn(0f, 1f)))
+                }
+            }
+        }
     }) {
         drawRect(Brush.verticalGradient(hueColors))
-        drawRect(Color.White, Offset(size.width * 0.1f, (1f-hue)*size.height - 1.5f), Size(size.width * 0.8f, 3f))
+        val y = (1f - hue) * size.height
+        drawRect(Color.White, Offset(size.width * 0.1f, y - 2f), Size(size.width * 0.8f, 4f))
     }
 }
 
 @Composable
 private fun SvSquare(modifier: Modifier, hue: Float, sat: Float, val_: Float, onSvChanged: (Float, Float) -> Unit) {
     val hueColor = Color.hsv(hue, 1f, 1f)
+    var isDragging by remember { mutableStateOf(false) }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var dragY by remember { mutableFloatStateOf(0f) }
+    var initSat by remember { mutableFloatStateOf(sat) }
+    var initVal by remember { mutableFloatStateOf(val_) }
+
     Canvas(modifier = modifier.pointerInput(Unit) {
-        detectTapGestures { val sx=(it.x/size.width).coerceIn(0f,1f); val vy=1f-(it.y/size.height).coerceIn(0f,1f); onSvChanged(sx,vy) }
-        detectDragGestures { change, _ -> change.consume(); val sx=(change.position.x/size.width).coerceIn(0f,1f); val vy=1f-(change.position.y/size.height).coerceIn(0f,1f); onSvChanged(sx,vy) }
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitFirstDown()
+                down.consume()
+                isDragging = true
+                dragX = down.position.x
+                dragY = down.position.y
+                initSat = sat; initVal = val_
+                onSvChanged((down.position.x / size.width).coerceIn(0f, 1f), 1f - (down.position.y / size.height).coerceIn(0f, 1f))
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    change.consume()
+                    dragX = change.position.x
+                    dragY = change.position.y
+                    onSvChanged((change.position.x / size.width).coerceIn(0f, 1f), 1f - (change.position.y / size.height).coerceIn(0f, 1f))
+                }
+                isDragging = false
+            }
+        }
     }) {
         drawRect(Brush.horizontalGradient(listOf(Color.White, hueColor)))
         drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
-        drawCircle(Color.White, radius = 7f, center = Offset(sat*size.width, (1f-val_)*size.height))
-        drawCircle(Color.Black, radius = 5.5f, center = Offset(sat*size.width, (1f-val_)*size.height))
+        val cx = sat * size.width
+        val cy = (1f - val_) * size.height
+        val posColor = Color.hsv(hue, sat, val_)
+        val lum = posColor.red * 0.299f + posColor.green * 0.587f + posColor.blue * 0.114f
+        val outlineColor = if (lum > 0.5f) Color.Black else Color.White
+        drawCircle(outlineColor, radius = 8f, center = Offset(cx, cy))
+        drawCircle(posColor, radius = 5f, center = Offset(cx, cy))
+
+        if (isDragging) {
+            val ringR = 192f
+            val innerR = 128f
+            val ringW = ringR - innerR
+            val curColor = Color.hsv(hue, sat, val_)
+            val prevColor = Color.hsv(hue, initSat, initVal)
+            val rSize = Size(ringR * 2, ringR * 2)
+            val rOff = Offset(dragX - ringR, dragY - ringR)
+
+            drawArc(prevColor, startAngle = 0f, sweepAngle = 180f, useCenter = false, topLeft = rOff, size = rSize, style = Stroke(width = ringW))
+            drawArc(curColor, startAngle = 180f, sweepAngle = 180f, useCenter = false, topLeft = rOff, size = rSize, style = Stroke(width = ringW))
+            drawCircle(Color.White.copy(alpha = 0.9f), radius = ringR, center = Offset(dragX, dragY), style = Stroke(width = 3f))
+            drawCircle(Color.White.copy(alpha = 0.5f), radius = innerR, center = Offset(dragX, dragY), style = Stroke(width = 2f))
+            drawLine(Color.White.copy(alpha = 0.6f), Offset(dragX - 12f, dragY), Offset(dragX + 12f, dragY), strokeWidth = 2f)
+            drawLine(Color.White.copy(alpha = 0.6f), Offset(dragX, dragY - 12f), Offset(dragX, dragY + 12f), strokeWidth = 2f)
+        }
     }
 }
 
@@ -958,12 +1023,25 @@ private fun SvSquare(modifier: Modifier, hue: Float, sat: Float, val_: Float, on
 private fun AlphaBar(modifier: Modifier, hue: Float, sat: Float, val_: Float, alpha: Float, onAlphaChanged: (Float) -> Unit) {
     val color = Color.hsv(hue, sat, val_, 1f)
     Canvas(modifier = modifier.pointerInput(Unit) {
-        detectTapGestures { onAlphaChanged((it.x/size.width).coerceIn(0f,1f)) }
-        detectDragGestures { change, _ -> change.consume(); onAlphaChanged((change.position.x/size.width).coerceIn(0f,1f)) }
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitFirstDown()
+                down.consume()
+                onAlphaChanged((down.position.x / size.width).coerceIn(0f, 1f))
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    change.consume()
+                    onAlphaChanged((change.position.x / size.width).coerceIn(0f, 1f))
+                }
+            }
+        }
     }) {
-        val sq = 4f; val n = (size.width/sq).toInt(); val m = (size.height/sq).toInt()
-        for (dx in 0 until n) for (dy in 0 until m) drawRect(if((dx+dy)%2==0) Color.White else Color.Gray, Offset(dx*sq,dy*sq), Size(sq,sq))
+        val sq = 4f; val n = (size.width / sq).toInt(); val m = (size.height / sq).toInt()
+        for (dx in 0 until n) for (dy in 0 until m) drawRect(if ((dx + dy) % 2 == 0) Color.White else Color.Gray, Offset(dx * sq, dy * sq), Size(sq, sq))
         drawRect(Brush.horizontalGradient(listOf(Color.Transparent, color)))
-        drawRect(Color.White, Offset(alpha*size.width - 1.5f, size.height*0.1f), Size(3f, size.height*0.8f))
+        val x = alpha * size.width
+        drawRect(Color.White, Offset(x - 2f, size.height * 0.1f), Size(4f, size.height * 0.8f))
     }
 }
