@@ -80,46 +80,57 @@ class Document(val width: Int, val height: Int, var name: String) {
         }
         compositeLayers(frame, sx, sy, ex, ey)
         displayCanvas.syncTexRegion(sx, sy, ex, ey)
-        displayCanvas.markDirtyAll()
+        displayCanvas.markDirtyRegion(sx, sy, ex, ey)
     }
 
-    private fun compositeLayers(frame: Frame, sx: Int, sy: Int, ex: Int, ey: Int) {
+private fun compositeLayers(frame: Frame, sx: Int, sy: Int, ex: Int, ey: Int) {
         val disp = displayCanvas.pixels
         val w = width
         for (layer in frame.layers) {
             if (!layer.visible || layer.opacity <= 0f) continue
             val src = layer.canvas.pixels
             val op = layer.opacity
-            var y = sy
-            while (y <= ey) {
-                var x = sx
-                while (x <= ex) {
-                    val idx = y * w + x
-                    val s = src[idx]
-                    if (s == 0) { x++; continue }
-                    val sa = (s ushr 24) / 255f * op
-                    if (sa <= 0f) { x++; continue }
-                    val d = disp[idx]
-                    val da = (d ushr 24) / 255f
-                    val oa = sa + da * (1f - sa)
-                    if (oa <= 0f) { disp[idx] = 0; x++; continue }
-                    val inv = 1f / oa
-                    val sr = (s ushr 16 and 0xff) / 255f
-                    val sg = (s ushr 8 and 0xff) / 255f
-                    val sb = (s and 0xff) / 255f
-                    val dr = (d ushr 16 and 0xff) / 255f
-                    val dg = (d ushr 8 and 0xff) / 255f
-                    val db = (d and 0xff) / 255f
-                    val or = (sr * sa + dr * da * (1f - sa)) * inv
-                    val og = (sg * sa + dg * da * (1f - sa)) * inv
-                    val ob = (sb * sa + db * da * (1f - sa)) * inv
-                    disp[idx] = ((oa * 255f + 0.5f).toInt() shl 24) or
-                            ((or * 255f + 0.5f).toInt() shl 16) or
-                            ((og * 255f + 0.5f).toInt() shl 8) or
-                            (ob * 255f + 0.5f).toInt()
-                    x++
+            if (op >= 1f) {
+                var y = sy
+                while (y <= ey) {
+                    var x = sx
+                    while (x <= ex) {
+                        val idx = y * w + x
+                        val s = src[idx]
+                        if (s != 0) disp[idx] = s
+                        x++
+                    }
+                    y++
                 }
-                y++
+            } else {
+                var y = sy
+                while (y <= ey) {
+                    var x = sx
+                    while (x <= ex) {
+                        val idx = y * w + x
+                        val s = src[idx]
+                        if (s == 0) { x++; continue }
+                        val sa = (s ushr 24) / 255f * op
+                        if (sa <= 0f) { x++; continue }
+                        val d = disp[idx]
+                        val da = (d ushr 24) / 255f
+                        val oa = sa + da * (1f - sa)
+                        if (oa <= 0f) { disp[idx] = 0; x++; continue }
+                        val inv = 1f / oa
+                        val sr = (s ushr 16 and 0xff) / 255f
+                        val sg = (s ushr 8 and 0xff) / 255f
+                        val sb = (s and 0xff) / 255f
+                        val dr = (d ushr 16 and 0xff) / 255f
+                        val dg = (d ushr 8 and 0xff) / 255f
+                        val db = (d and 0xff) / 255f
+                        disp[idx] = ((oa * 255f).toInt().coerceIn(0, 255) shl 24) or
+                            (((sr * sa + dr * da * (1f - sa)) * inv * 255f).toInt().coerceIn(0, 255) shl 16) or
+                            (((sg * sa + dg * da * (1f - sa)) * inv * 255f).toInt().coerceIn(0, 255) shl 8) or
+                            (((sb * sa + db * da * (1f - sa)) * inv * 255f).toInt().coerceIn(0, 255))
+                        x++
+                    }
+                    y++
+                }
             }
         }
     }
