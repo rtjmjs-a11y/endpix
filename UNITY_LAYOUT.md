@@ -1,8 +1,31 @@
-# endpix UI 完整布局规格 (Unity AI 可执行)
+# endpix 完整规格 — UI布局 + 功能逻辑 (Unity AI 可执行)
 
 > 参考分辨率: 1080×2340 (竖屏手机), 坐标原点 (0,0) = 左上角
 > 所有尺寸: Unity px (= Android dp × 3 for 3x density)
 > 颜色格式: #RRGGBB 或 #AARRGGBB
+> 
+> **注意**: 本文档是基于 Android 版本 endpix 的 UI/UX 规约。Unity 如有更好的实现方案（如 Shader Graph 替代 OpenGL、UI Toolkit 替代 Compose），优先使用 Unity 原生方案，不必照搬 Android 细节。
+
+---
+
+## 目录
+
+1. [整体结构树](#整体结构树)
+2. [主画布](#1-主画布)
+3. [StatusBar](#2-statusbar)
+4. [DocStrip](#3-docstrip)
+5. [FrameStrip](#4-framestrip)
+6. [ToolColumn](#5-toolcolumn)
+7. [PaletteBar](#6-palettebar)
+8. [LayerPanel](#7-layerpanel)
+9. [BottomStrip](#8-bottomstrip)
+10. [子选择器](#9-子选择器)
+11. [HSV 取色器](#10-hsv-取色器)
+12. [设置对话框](#11-设置对话框)
+13. [设计常量](#12-设计常量)
+14. [功能逻辑](#13-功能逻辑)
+15. [数据模型](#14-数据模型)
+16. [性能优化](#15-性能优化)
 
 ---
 
@@ -55,24 +78,28 @@ Canvas (Screen Space Overlay, 1080×2340)
 
 ---
 
-## 1. 主画布 (EditorScreen)
+## 1. 主画布
 
 ```csharp
-// 最底层: OpenGL 渲染 (Unity 中用 RawImage + RenderTexture)
+// 最底层: 像素画布渲染 (Unity 中用 RawImage + RenderTexture)
+// 所有像素数据存储在 Texture2D 中, 通过 Graphics.Blit 上传到 RenderTexture
 RawImage canvas = new RawImage();
 canvas.texture = renderTexture; // 从 PixelCanvas 上传
 canvas.rectTransform = new RectTransform(0, 0, 1080, 2340);
 canvas.anchorMin = (0, 0); canvas.anchorMax = (1, 1);
+
+// 渲染管线: 棋盘格背景 → 图层合成 → 纹理上传 → GPU 渲染
+// 图层合成: 遍历所有可见图层, 按 opacity 混合像素
+// 脏区域追踪: 只更新变化的像素区域, 减少 GPU 上传量
 ```
 
 ---
 
-## 2. StatusBar (左上角信息栏)
+## 2. StatusBar
 
 ```csharp
 // 位置: TopStart, auto-size
-// 背景: 30%透明黑 (#4D000000), 圆角 8dp
-// 内边距: horizontal 8, vertical 3
+// 背景: 30%透明黑 (#4D000000), 圆角 8dp, 内边距 (8,3)
 
 VerticalLayout statusBar = new VerticalLayout();
 statusBar.SetAnchor(AnchorPresets.TopLeft);
@@ -99,7 +126,7 @@ row2.AddText("GPU:12%", fontSize=12, color=#FFAA88);
 
 ---
 
-## 3. DocStrip (文档标签)
+## 3. DocStrip
 
 ```csharp
 // 位置: TopStart, 紧接 StatusBar
@@ -123,7 +150,7 @@ Button addBtn = new Button(icon_plus, size=30, bg=#B32A2A2E);
 
 ---
 
-## 4. FrameStrip (帧标签)
+## 4. FrameStrip
 
 ```csharp
 // 位置: TopStart, 紧接 DocStrip
@@ -147,7 +174,7 @@ Button delFrame = new Button(icon_close, 30);
 
 ---
 
-## 5. ToolColumn (左侧工具栏)
+## 5. ToolColumn
 
 ```csharp
 // 位置: CenterLeft, x=4, 宽 48, 高 fill
@@ -156,7 +183,6 @@ Button delFrame = new Button(icon_close, 30);
 VerticalLayout toolColumn = new VerticalLayout();
 toolColumn.SetAnchor(AnchorPresets.MiddleLeft);
 toolColumn.SetSize(48, parent.height - 200);
-toolColumn.SetPosition(4, 100);
 toolColumn.spacing = 4;
 toolColumn.padding = 4;
 
@@ -164,7 +190,7 @@ toolColumn.padding = 4;
 Button pencil = new Button(icon_pencil, 40×40);
 pencil.bg = (tool==PENCIL) ? primaryBlue : #B32A2A2E;
 pencil.onClick = () => { if(tool!=PENCIL) SelectTool(PENCIL); ToggleBrushSelector(); };
-pencil.badge = (brushSize).ToString(); // 右下角, fontSize=12, color=#64B5F6, bg=#1A1A1E
+pencil.badge = (brushSize).ToString(); // 右下角角标, fontSize=12, color=#64B5F6, bg=#1A1A1E
 pencil.badge.show = brushSize > 1;
 
 // 橡皮按钮
@@ -178,7 +204,7 @@ eraser.badge.show = eraserSize > 1;
 Button bucket = new Button(icon_bucket, 40×40);
 bucket.bg = (tool==BUCKET) ? primaryBlue : #B32A2A2E;
 bucket.onClick = () => SelectTool(BUCKET);
-bucket.badge = "●"; // 红点 #F44336, 8×8
+bucket.badge = "●"; // 红点 #F44336, 8×8dp
 bucket.badge.show = bucketRemovePixels;
 
 // 选择按钮
@@ -196,7 +222,7 @@ shape.onClick = () => { if(tool!=SHAPE) SelectTool(SHAPE); ToggleShapeSelector()
 
 ---
 
-## 6. PaletteBar (右侧调色板)
+## 6. PaletteBar
 
 ```csharp
 // 位置: CenterRight, x=parent.w-52, 宽 48, 高 fill
@@ -205,7 +231,6 @@ shape.onClick = () => { if(tool!=SHAPE) SelectTool(SHAPE); ToggleShapeSelector()
 VerticalLayout paletteBar = new VerticalLayout();
 paletteBar.SetAnchor(AnchorPresets.MiddleRight);
 paletteBar.SetSize(48, parent.height - 200);
-paletteBar.SetPosition(parent.width - 52, 100);
 paletteBar.spacing = 2;
 
 foreach (int idx, Color c in palette) {
@@ -230,7 +255,7 @@ if (eyedropperActive) {
 
 ---
 
-## 7. LayerPanel (图层面板, 右上角)
+## 7. LayerPanel
 
 ```csharp
 // 位置: TopEnd, y=topStripsH, 宽 96, 内边距 4
@@ -239,7 +264,6 @@ if (eyedropperActive) {
 VerticalLayout layerPanel = new VerticalLayout();
 layerPanel.SetAnchor(AnchorPresets.TopRight);
 layerPanel.SetSize(96, auto);
-layerPanel.SetPosition(0, topStripsHeight);
 layerPanel.padding = new RectOffset(4, 4, 4, 4);
 layerPanel.backgroundColor = new Color(0.18f, 0.18f, 0.22f, 0.95f); // #E62A2A2E
 layerPanel.cornerRadius = LocalCornerRadius;
@@ -253,14 +277,14 @@ header.AddButton(icon_arrow_up, 24, onClick: MoveLayerUp);
 header.AddButton(icon_arrow_down, 24, onClick: MoveLayerDown);
 header.AddButton(icon_close, 24, onClick: DeleteLayer);
 
-// 图层列表 (从下到上)
+// 图层列表 (从下到上渲染)
 foreach (layer in layers.Reversed()) {
     HorizontalLayout layerRow = new HorizontalLayout();
     layerRow.bg = (selected) ? primaryBlue_Container : #B32A2A2E;
     layerRow.border = (selected) ? (1, primaryBlue) : null;
     layerRow.cornerRadius = LocalCornerRadius;
     layerRow.padding = 3;
-    layerRow.AddImage(layer.thumbnail, 20×20); // 或 20×20 灰色方块
+    layerRow.AddImage(layer.thumbnail, 20×20);
     layerRow.AddText(layer.name, fontSize=12, White, maxLines=1);
     layerRow.AddFlexibleSpace();
     layerRow.AddIcon(layer.visible ? icon_eye : icon_eye_off, 14, onClick: ToggleVisible);
@@ -277,11 +301,10 @@ if (layers.Count > 1) {
 
 ---
 
-## 8. BottomStrip (底部工具栏)
+## 8. BottomStrip
 
 ```csharp
-// 位置: BottomCenter, 宽 fill, 高 48
-// 内边距 (6,4), 横向布局
+// 位置: BottomCenter, 宽 fill, 高 48, 内边距 (6,4), 横向布局
 
 HorizontalLayout bottomStrip = new HorizontalLayout();
 bottomStrip.SetAnchor(AnchorPresets.BottomCenter);
@@ -314,7 +337,7 @@ Button redo = new Button(icon_redo, 40×40, enabled: canRedo);
 
 ---
 
-## 9. 子选择器 (Sub-Selector 弹窗)
+## 9. 子选择器
 
 ```csharp
 // 所有子选择器: 出现在对应工具按钮右侧
@@ -373,7 +396,7 @@ if (hasSelection) {
 
 ---
 
-## 10. HSV 取色器 (ColorPickerDialog)
+## 10. HSV 取色器
 
 ```csharp
 // 自定义 Dialog, 居中, 背景半透明遮罩
@@ -399,7 +422,7 @@ content.size = 360 + 36 + 6; // 402dp 宽
 HorizontalLayout row1 = new HorizontalLayout();
 row1.AddHueBar(width=36, height=360); // 垂直彩虹渐变, 白色横条指示器
 row1.AddSpace(6);
-row1.AddSvSquare(360, 360); // 饱和度/明度方块, 空心圆指示器
+row1.AddSvSquare(360, 360); // 饱和度/明度方块, 空心圆指示器 (自适应黑白)
 
 // 第二行: 对比色 + 透明条
 HorizontalLayout row2 = new HorizontalLayout();
@@ -418,16 +441,34 @@ hexInput.onLongPress = CopyToClipboard;
 HorizontalLayout buttons = new HorizontalLayout(spacing=24);
 buttons.AddButton("确定", bg=#4CAF50, padding=14, font=titleSmall); // 16px
 buttons.AddButton("取消", bg=#F44336, padding=14, font=titleSmall);
+```
 
-// 色环 (长按SvSquare时显示)
-// outerRadius=192px, innerRadius=128px
-// 上半=当前色, 下半=原色, 中心透明+十字
-// 仅显示在 ring band (128-192) 内
+**色环 (长按SV方块时显示):**
+```csharp
+// 外半径 192px, 内半径 128px (空心)
+// 上半环 = 当前色 (Color.hsv(hue, sat, val))
+// 下半环 = 拖拽前颜色 (Color.hsv(hue, initSat, initVal))
+// 中心: 透明 + 十字 (12px臂长, 白色60%)
+// 外环描边: 白色 3px, 内环描边: 白色 50% 2px
+// 色环跟随手指, 可超出SV方块边界
+// 仅在长按拖拽时显示, 松手消失
+```
+
+**调色盘功能 (PaletteBar):**
+```csharp
+// 点击色块 → 弹出 DropdownMenu: [调色盘] [取色器]
+// 点击"调色盘" → 打开 HSV 取色器 (ColorPickerDialog)
+// 点击"取色器" → 激活取色模式 (eyedropperActive = true)
+// 取色模式下:
+//   点击画布任意位置 → 获取该像素颜色 → 加入调色板 → 关闭取色
+//   点击色块 → 直接选中颜色 + 关闭取色
+// 长按色块 → 直接选中颜色 (不弹出菜单)
+// 取色器激活时底部显示取色器图标 (蓝色 #64B5F6)
 ```
 
 ---
 
-## 11. 设置对话框 (SettingsDialog)
+## 11. 设置对话框
 
 ```csharp
 // 位置: 居中
@@ -502,7 +543,7 @@ foreach (mode in [DEFAULT, REGION, ASYNC, HA]) {
 | PopupBg | #E62A2A2E | 弹窗背景 (95%不透明) |
 | LabelBg | #4DFFFFFF | 标签栏背景 (30%透明白) |
 | InfoBg | #4D000000 | 信息栏背景 (30%透明黑) |
-| CornerRadius | 8dp | 默认圆角 (可调) |
+| CornerRadius | 8dp | 默认圆角 (可调 0-20dp) |
 | ButtonSize | 40dp | 主按钮大小 |
 | ColorSlotSize | 30dp | 色块大小 |
 | SmallButtonSize | 24dp | 小按钮 (图层操作) |
@@ -517,3 +558,321 @@ foreach (mode in [DEFAULT, REGION, ASYNC, HA]) {
 | FontBodySmall | 14px | 正文小字 |
 | FontTitleSmall | 16px | 按钮文字 |
 | FontTitleMedium | 18px | 标题文字 |
+
+---
+
+## 13. 功能逻辑
+
+### 13.1 工具系统
+
+```csharp
+enum Tool { PENCIL, ERASER, BUCKET, SELECT, SHAPE }
+enum ShapeMode { LINE, RECTANGLE, CIRCLE, LEAF, LASSO }
+enum SelectMode { RECT, LASSO }
+enum PpMode { NORMAL, EXTREME } // 像素完美模式
+enum PerfMode { DEFAULT, REGION, ASYNC, HA } // 性能方案
+
+// 工具切换时自动取消平移模式 (panMode = false)
+// 选中工具 → 按钮高亮 (primary blue)
+// 点击已选中工具 → 展开/收起子选项
+```
+
+### 13.2 铅笔 (PENCIL)
+
+```csharp
+// 画笔大小: 1-10, 默认 1
+// 像素完美: 仅在 brushSize==1 时生效
+//   正常模式: 1-connected Bresenham, 无后处理
+//   极端模式: 1-connected Bresenham + cleanPixelJoints (抬笔后清除2×2方块)
+// 画笔大小 > 1: 使用 size×size 方块印章, 像素完美不生效
+// 抬笔后处理: strokePixels 追踪 + cleanPixelJoints 扫描
+// 绘制: drawLine(px,py, x,y, color) 或 drawLineSize(px,py, x,y, color, size, pp)
+// 触摸: 单指绘制, 双指缩放, 单指平移(panMode)
+```
+
+### 13.3 橡皮擦 (ERASER)
+
+```csharp
+// 橡皮擦大小: 1-10, 默认 1
+// 大小=1: 单像素擦除 (drawLine with color=0)
+// 大小>1: size×size 方块擦除
+```
+
+### 13.4 油漆桶 (BUCKET)
+
+```csharp
+// floodFill(x, y, color) - 填充同色区域
+// 移除像素模式: floodFill(x, y, 0) - 填充透明
+// 开关显示右下角红点角标
+```
+
+### 13.5 选择工具 (SELECT)
+
+```csharp
+// 方形选择: 拖拽创建矩形选区, 松手确认
+// 套索选择: 自由路径记录点, 松手取边界框
+// 长按选择工具: 全选画布
+// 有选区后显示: 确认(绿) / 复制(蓝) / 取消(红)
+// 取消: 恢复快照 (selSnapshot)
+// 确认: 清除选区状态
+// 复制: 当前仅 flatten (待实现实际复制)
+```
+
+### 13.6 图形工具 (SHAPE)
+
+```csharp
+// 子选项: 直线/矩形/圆形/柳叶/套索填充
+// 空心填充: 仅绘制边框, 不填充内部
+// 绘制: 按下→拖拽预览→松手确认
+// 套索: 记录路径点, 3点以上填充多边形
+// 图标根据 shapeMode 和 shapeFill 动态切换
+```
+
+### 13.7 像素完美 (Pixel Perfect)
+
+```csharp
+// 算法: 1-connected Bresenham (midpoint 变体)
+// 每步只移动一个方向, 不产生2×2方块
+// 抬笔后处理: cleanPixelJoints 扫描
+//   - 检测 3/4 L形和 4/4 方块
+//   - 仅删除 strokePixels 中的角点
+//   - 限制 3 轮扫描, 笔画边界框内
+// strokePixels: HashSet<long> 追踪当前笔画像素
+// beginStroke: 清空追踪集合
+// ppSet: 设置像素 + 记录到追踪集合
+```
+
+### 13.8 缩放与平移
+
+```csharp
+// 缩放级别: 1,2,4,8,16,32,64 (离散)
+// 适配: 按画布尺寸自动适配到屏幕
+// 平移: 单指平移 (panMode)
+// 缩放: 双指捏合 / 按钮
+// 平移按钮: 切换 panMode, 选中时蓝色高亮
+```
+
+### 13.9 撤销/重做
+
+```csharp
+// 全局历史栈 (HistoryStack)
+// 每次绘制前 push snapshot (layer.canvas.snapshot())
+// 切换图层/帧时清空历史
+// 撤销: 恢复上一个快照 → flatten
+// 重做: 恢复下一个快照 → flatten
+// 按钮: 无历史时灰色禁用
+```
+
+### 13.10 性能方案
+
+```csharp
+// DEFAULT: doc.flatten() 全量合成 + 全量纹理上传
+// REGION (默认): flattenRegion 脏区域合成 + markDirtyRegion 区域上传
+// ASYNC: 同 DEFAULT (未实现异步)
+// HA: GPU 图层混合, 每层独立 GL 纹理, ensureLayerTexture 上传
+// 切换方案时自动同步 renderer.hardwareAcceleration + invalidateTexture
+```
+
+### 13.11 快捷键
+
+```csharp
+// 底部快捷键按钮: 40×40dp
+// 点击 = 执行 shortcutTapAction
+// 长按 = 执行 shortcutLongPressAction
+// 可配置动作: 无/适配/保存/开启网格/打开设置
+// 设置中配置: Picker 选择器, 显示图标+名称+▼
+```
+
+### 13.12 多文档/帧/图层
+
+```csharp
+// 文档: 独立画布, 标签页切换, 最多 4096×4096
+// 帧: 每个文档多个帧, 缩略图显示
+// 图层: 每个帧多个图层, 支持透明度/可见性
+// 图层合成: 从下到上遍历, 按 opacity 混合
+// 缩略图: 48×48 像素, 从 displayCanvas 生成
+```
+
+### 13.13 保存/恢复
+
+```csharp
+// 自动保存: onPause 时序列化所有文档到文件
+// 保存数据: SaveData (文档列表 + 工具 + 颜色 + 圆角)
+// 恢复: onResume 时从文件读取, 恢复所有状态
+// 圆角持久化: SaveData 包含 uiCornerRadius
+// 文件大小限制: < 200MB 防止 OOM
+```
+
+### 13.14 导出
+
+```csharp
+// 导出 PNG: 将当前帧的 displayCanvas 合成后导出
+// 支持全画布尺寸 (不缩放)
+```
+
+---
+
+## 14. 数据模型
+
+```csharp
+// ===== Document =====
+class Document {
+    string name;
+    int width, height;
+    List<Frame> frames;
+    int activeFrameIndex;
+    PixelCanvas displayCanvas; // 合成结果
+    
+    void Flatten();           // 全量合成所有图层
+    void FlattenRegion(minX, minY, maxX, maxY); // 脏区域合成
+    void CompositeLayers(frame, sx, sy, ex, ey); // 图层混合
+    Frame ActiveFrame();
+}
+
+// ===== Frame =====
+class Frame {
+    List<Layer> layers;
+    int activeLayerIndex;
+    
+    Layer ActiveLayer();
+    void AddLayer(name);
+    void SelectLayer(index);
+}
+
+// ===== Layer =====
+class Layer {
+    string name;
+    PixelCanvas canvas;
+    float opacity;      // 0..1
+    bool visible;
+    int glTextureId;    // GPU纹理ID
+}
+
+// ===== PixelCanvas =====
+class PixelCanvas {
+    int width, height;
+    int[] pixels;        // ARGB格式
+    ByteBuffer texBuffer; // GPU纹理缓冲
+    int dirtyMinX, dirtyMinY, dirtyMaxX, dirtyMaxY;
+    
+    void MarkDirty(x, y);
+    void MarkDirtyRegion(minX, minY, maxX, maxY);
+    void MarkDirtyAll();
+    bool HasDirtyRegion { get; }
+    int[] GetAndClearDirty();  // 返回脏区域并清除
+    void ClearDirty();
+    void SyncTexRegion(minX, minY, maxX, maxY);
+    void RebuildTexBuffer();
+    
+    // 绘图
+    void DrawLine(x0, y0, x1, y1, color);
+    void DrawLineSize(x0, y0, x1, y1, color, size, pp);
+    void DrawPixelPerfectLine(x0, y0, x1, y1, color);
+    void DrawRect(x0, y0, x1, y1, color, fill);
+    void DrawCircle(x0, y0, x1, y1, color, fill);
+    void DrawLeaf(x0, y0, x1, y1, color, fill);
+    void FloodFill(x, y, color);
+    void FillPolygon(points, color);
+    
+    // 像素完美追踪
+    void BeginStroke();
+    void ppSet(x, y, color);
+    void CleanPixelJoints(minX, minY, maxX, maxY, color);
+    
+    // 历史
+    int[] Snapshot();    // 全量快照
+    void Restore(snapshot);
+}
+
+// ===== History =====
+class History {
+    Stack<IntArray> undoStack;
+    Stack<IntArray> redoStack;
+    
+    void Push(snapshot);
+    int[] Undo(current);
+    int[] Redo(current);
+    void Clear();
+}
+
+// ===== SaveData =====
+[Serializable]
+class SaveData {
+    List<DocData> docs;
+    int activeDoc;
+    Tool tool;
+    int color;
+    ShapeMode shapeMode;
+    bool shapeFill;
+    float uiCornerRadius;
+}
+```
+
+---
+
+## 15. 性能优化
+
+```csharp
+// GPU 上传: 脏区域纹理上传 (glTexSubImage2D)
+//   - flattenRegion 只标记脏区域 (markDirtyRegion)
+//   - 大画布 GPU 带宽 ↓95%
+//      - 之前: markDirtyAll → 全量上传 16MB/帧
+//      - 现在: markDirtyRegion → 仅上传脏区域
+//
+// CPU 合成: opacity=1.0 快速路径
+//   - 不透明层直接复制像素 (跳过浮点混合)
+//   - 常见场景 CPU ↓90%
+//   - 不透明层: if(s != 0) disp[idx] = s
+//   - 半透明层: 保留浮点混合 (精确)
+//
+// 脏区域追踪: 每个 PixelCanvas 跟踪 dirtyMin/MaxX/Y
+//   - 绘图操作自动标记脏像素
+//   - 合成时只处理脏区域
+//
+// 历史优化 (待实现):
+//   - 增量式快照: 只存储变化像素 (HashMap<int, int>)
+//   - 减少内存分配和拷贝
+```
+
+---
+
+## 附录: 图标清单
+
+| 图标 | 文件名 | 用途 |
+|------|--------|------|
+| ✏️ | ic_pencil | 铅笔工具 |
+| 🧹 | ic_eraser | 橡皮擦工具 |
+| 🪣 | ic_bucket | 油漆桶工具 |
+| 💉 | ic_eyedropper | 取色器 |
+| ✂️ | ic_select_rect / ic_select_lasso | 选择工具 |
+| 📏 | ic_line | 直线图形 |
+| ⬜ | ic_rect / ic_rect_filled | 矩形图形 |
+| ⭕ | ic_circle / ic_circle_filled | 圆形图形 |
+| 🌿 | ic_leaf / ic_leaf_filled | 柳叶图形 |
+| 🪢 | ic_lasso | 套索图形 |
+| ♟️ | ic_move | 平移 |
+| 🔍 | ic_fit | 适配 |
+| ↩️ | ic_undo | 撤销 |
+| ↪️ | ic_redo | 重做 |
+| # | ic_grid | 网格 |
+| ➕ | ic_plus | 添加 |
+| ➖ | ic_minus | 缩小 |
+| ❌ | ic_close | 关闭 |
+| 📋 | ic_duplicate | 复制 |
+| 📚 | ic_layers | 图层 |
+| 👁️ | ic_eye / ic_eye_off | 可见性 |
+| 💾 | ic_save | 保存 |
+| ⚙️ | ic_shortcut | 快捷键 |
+| ☰ | ic_menu | 菜单 |
+| ⬆️ | ic_arrow_up | 上移图层 |
+| ⬇️ | ic_arrow_down | 下移图层 |
+| 🎨 | ic_palette | 调色盘 |
+| ↖️ | ic_expand_tl | 扩展左上 |
+| ⬆️ | ic_expand_t | 扩展上 |
+| ↗️ | ic_expand_tr | 扩展右上 |
+| ⬅️ | ic_expand_l | 扩展左 |
+| ⊕ | ic_expand_c | 扩展中心 |
+| ➡️ | ic_expand_r | 扩展右 |
+| ↙️ | ic_expand_bl | 扩展左下 |
+| ⬇️ | ic_expand_b | 扩展下 |
+| ↘️ | ic_expand_br | 扩展右下 |
